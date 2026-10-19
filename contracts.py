@@ -1,4 +1,4 @@
-"""Version 3 contracts, independent of the existing Solver and Sampler.
+"""Standalone quantity, model, and derivative contracts for PINN Engine.
 
 This module declares quantities, named Tensor values, and model contracts.
 evaluate consumes raw Tensors; forward handles named sample axes with
@@ -23,7 +23,7 @@ Axis = str
 class Geometry(ABC):
     """Abstract domain operations for the new design, without an implementation.
 
-    This contract is independent of pinnlab.geometry.base.Geometry for now.
+    Concrete geometry implementations are supplied by the application.
     Geometry identity remains object identity, even when shapes are equivalent.
     """
 

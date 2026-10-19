@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+build/
+dist/
+.build-tmp/
+*.egg-info/
+.env
+.env.*
+!.env.example
+solver_graph.svg
+solver_graph.png
+solver_graph.pdf
