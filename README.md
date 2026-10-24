@@ -21,8 +21,18 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
 
 ## Files
 
-- [contracts.py](contracts.py): `Quantity`, `Field`, `Value`, `Signature`, abstract
-  `Model`, symbolic derivatives, and the hosting `Solver`.
+- [pinn_engine/](pinn_engine/): implementation modules:
+  - `geometry.py`: the abstract geometry interface.
+  - `quantities.py`: `Quantity` and `Field` declarations.
+  - `values.py`: `Value`, named axes, and runtime shape checks.
+  - `model.py`: `Signature`, abstract `Model`, and automatic `vmap`.
+  - `derivatives.py`: symbolic derivatives, derivative plans, AD checks, and the
+    numerical derivative execution boundary.
+  - `solver.py`: graph wiring, execution, and visualization; derivative-specific
+    work is delegated to `derivatives.py`.
+- [contracts.py](contracts.py): compatibility imports and the runnable example.
+  Both `from contracts import Model` and `from pinn_engine import Model` resolve
+  to the same class. Existing notebook imports remain valid.
 - [Temperature_Tutorial.ipynb](Temperature_Tutorial.ipynb): a DeepONet temperature
   example. Its branch takes the left boundary temperature, its trunk takes the
   coordinate, and the model learns from the analytical solution.
