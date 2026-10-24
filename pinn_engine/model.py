@@ -87,7 +87,8 @@ def _batch_axes(signature: Signature, layouts) -> tuple[str, ...]:
 class Model(nn.Module, ABC):
     """An abstract computation, not necessarily a neural or trainable model.
 
-    evaluate follows the core signature and receives raw Tensors.
+    evaluate follows the core signature and receives raw Tensors, or lists
+    when a list axis is explicitly consumed in full.
     forward accepts Value objects and handles extra axes automatically.
     Call model(values) to preserve PyTorch hooks. Subclass constructors must call
     super().__init__() before assigning parameters or child modules.
@@ -123,12 +124,15 @@ class Model(nn.Module, ABC):
 
     @abstractmethod
     def evaluate(
-        self, values: Mapping[Quantity, torch.Tensor]
-    ) -> dict[Quantity, torch.Tensor]:
+        self, values: Mapping[Quantity, torch.Tensor | list[torch.Tensor]]
+    ) -> dict[Quantity, torch.Tensor | list[torch.Tensor]]:
         """Evaluate one call according to signature using the subclass algorithm.
 
         For a pointwise call, each Field value has only its intrinsic shape.
         For a full-point call, the point axis precedes the Field's intrinsic shape.
+        A full list axis must be first in that input's core signature. evaluate
+        then receives a list of Tensors, without Value wrappers. A returned list
+        likewise represents the first declared output core axis.
         Returned Quantity keys must match outputs.
         """
         raise NotImplementedError
@@ -152,35 +156,99 @@ class Model(nn.Module, ABC):
             _check_value(quantity, value, sizes)
 
         batch = _batch_axes(signature, {q: value.axes for q, value in values.items()})
-        arguments = []
+        list_axes = {v.axes[0] for v in values.values() if isinstance(v.tensor, list)}
+        if len(list_axes) > 1:
+            raise ValueError("Only one outer list axis is supported in a model call")
+        list_axis = next(iter(list_axes), None)
+        if list_axis in batch:
+            # Select a geometry before vectorizing its own dense sample axes.
+            # Other inputs may share that axis densely, or be shared by all geometries.
+            return self._map_list_axis(values, list_axis, sizes[list_axis])
+
+        # A retained geometry list can be vmapped over common dense axes, but
+        # vmap cannot pair 20 points in one geometry with 40 in another.
+        for axis in batch:
+            length = sizes[axis]
+            if isinstance(length, tuple) and len(set(length)) != 1:
+                raise ValueError(
+                    f"Cannot map ragged axis {axis!r} while retaining list axis "
+                    f"{list_axis!r}; consume both axes in the signature"
+                )
+
+        arguments, layouts = [], []
         for quantity, core in signature.inputs.items():
             value = values[quantity]
-            actual = value.axes
-            ordered = tuple(axis for axis in batch if axis in actual) + tuple(core)
+            is_list = isinstance(value.tensor, list)
+            if is_list and (not core or core[0] != list_axis):
+                raise ValueError("A retained list axis must be first in the core signature")
+            actual = value.axes[1:] if is_list else value.axes
+            leaf_core = tuple(core[1:]) if is_list else tuple(core)
+            ordered = tuple(axis for axis in batch if axis in actual) + leaf_core
+            members = value.tensor if is_list else (value.tensor,)
             permutation = tuple(actual.index(axis) for axis in ordered)
-            permutation += tuple(range(len(actual), value.tensor.ndim))
-            arguments.append(value.tensor.permute(permutation))
+            permutation += tuple(range(len(actual), members[0].ndim))
+            tensors = [tensor.permute(permutation) for tensor in members]
+            arguments.append(tensors if is_list else tensors[0])
+            layouts.append(actual)
 
         def call(*tensors):
-            # User code sees only the core Tensor shapes, with no Value wrappers.
+            # The list structure is preserved; vmap maps Tensor leaves inside it.
             result = self.evaluate(dict(zip(signature.inputs, tensors)))
             if set(result) != set(signature.outputs):
                 raise ValueError("Model returned quantities different from its signature")
-            for tensor in result.values():
-                if not isinstance(tensor, torch.Tensor):
-                    raise TypeError("Model.evaluate must return raw Tensor values")
+            for quantity, tensor in result.items():
+                if isinstance(tensor, list):
+                    if not signature.outputs[quantity] or not tensor:
+                        raise ValueError("A list output requires members and a declared core axis")
+                    if any(not isinstance(t, torch.Tensor) for t in tensor):
+                        raise TypeError("Model.evaluate must return Tensors or flat Tensor lists")
+                elif not isinstance(tensor, torch.Tensor):
+                    raise TypeError("Model.evaluate must return raw Tensor values or Tensor lists")
             return tuple(result[quantity] for quantity in signature.outputs)
 
-        # Inputs share batch-axis order after permutation. Wrapping inside-out
-        # makes each mapped axis leading when its corresponding vmap sees it.
+        # Nested in_dims describes both dense arguments and lists of Tensor leaves.
         mapped = call
         for axis in reversed(batch):
-            in_dims = tuple(0 if axis in values[q].axes else None for q in signature.inputs)
-            mapped = torch.func.vmap(mapped, in_dims=in_dims, out_dims=0)
+            in_dims = []
+            for argument, actual in zip(arguments, layouts):
+                dim = 0 if axis in actual else None
+                in_dims.append([dim] * len(argument) if isinstance(argument, list) else dim)
+            mapped = torch.func.vmap(mapped, in_dims=tuple(in_dims), out_dims=0)
 
         outputs = {}
         for quantity, tensor in zip(signature.outputs, mapped(*arguments)):
-            value = Value(tensor, batch + tuple(signature.outputs[quantity]))
+            core = tuple(signature.outputs[quantity])
+            # A list axis stays outermost, including when dense batch axes are mapped.
+            axes = (core[0],) + batch + core[1:] if isinstance(tensor, list) else batch + core
+            value = Value(tensor, axes)
             _check_value(quantity, value, sizes)
             outputs[quantity] = value
         return outputs
+
+    def _map_list_axis(self, values, axis, count) -> dict[Quantity, Value]:
+        """Run one geometry at a time, keeping reference slices and autograd.
+
+        Output lists are deliberately not stacked, even if member sizes match.
+        There is no padding, job scheduling, or implicit Cartesian matching.
+        """
+        collected, output_axes = {}, {}
+        for index in range(count):
+            selected = {}
+            for quantity, value in values.items():
+                if axis not in value.axes:
+                    selected[quantity] = value
+                    continue
+                position = value.axes.index(axis)
+                tensor = (value.tensor[index] if isinstance(value.tensor, list)
+                          else value.tensor.select(position, index))
+                axes = value.axes[:position] + value.axes[position + 1:]
+                selected[quantity] = Value(tensor, axes)
+            result = self.forward(selected)
+            for quantity, value in result.items():
+                if isinstance(value.tensor, list):
+                    raise ValueError("Nested output list axes are not supported")
+                if quantity in output_axes and output_axes[quantity] != value.axes:
+                    raise ValueError("Output axes must agree across geometries")
+                output_axes[quantity] = value.axes
+                collected.setdefault(quantity, []).append(value.tensor)
+        return {q: Value(tensors, (axis,) + output_axes[q]) for q, tensors in collected.items()}

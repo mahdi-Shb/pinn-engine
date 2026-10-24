@@ -38,13 +38,17 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
   coordinate, and the model learns from the analytical solution.
 - [tests/test_contracts.py](tests/test_contracts.py): executable contract tests.
 - [Current contract documentation, in Persian](docs/contracts.fa.md).
+- [Geometry lists and automatic batching, in Persian](docs/geometry_lists.fa.md).
 - [Design and research notes](docs/README.md).
 
 ## Current implementation boundary
 
 Ordinary model evaluation, named-axis `vmap`, parameter training, dependency
 planning, and graph visualization are implemented. A model can consume a full
-point axis and return values on that same axis.
+point axis and return values on that same axis. `Value` also accepts a flat list
+of Tensors for a named outer geometry axis with variable-size members. Models
+either consume that list in full or run per geometry; common dense axes can
+still use `vmap`. This representation adds no padding or parallel job scheduling.
 
 Numerical derivative execution is intentionally **not implemented**. The default
 AD boundary rejects requests that would incorrectly assume independence along
