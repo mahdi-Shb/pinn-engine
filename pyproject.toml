@@ -15,10 +15,10 @@ dev = ["pytest>=7"]
 notebook = ["matplotlib>=3.6", "ipython>=8", "jupyterlab>=4"]
 
 [tool.setuptools]
+package-dir = {"" = "src"}
 py-modules = ["contracts"]
 packages = ["pinn_engine"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
 addopts = "-ra"

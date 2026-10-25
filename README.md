@@ -15,13 +15,18 @@ python -m pytest
 jupyter lab Temperature_Tutorial.ipynb
 ```
 
+Install the project in the same Python environment used by pytest and the
+notebook kernel. The src layout intentionally does not inject the checkout into
+sys.path. After editing Python source, an editable install uses the changes
+without reinstalling.
+
 The engine itself only requires PyTorch; `dev` installs the test dependency and
 `notebook` installs the interactive tutorial dependencies. Graphviz's system
 `dot` executable is optional: the notebook has a Matplotlib graph fallback.
 
 ## Files
 
-- [pinn_engine/](pinn_engine/): implementation modules:
+- [src/pinn_engine/](src/pinn_engine/): implementation modules:
   - `geometry.py`: the abstract geometry interface.
   - `quantities.py`: `Quantity` and `Field` declarations.
   - `values.py`: `Value`, named axes, and runtime shape checks.
@@ -30,7 +35,7 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
     numerical derivative execution boundary.
   - `solver.py`: graph wiring, execution, and visualization; derivative-specific
     work is delegated to `derivatives.py`.
-- [contracts.py](contracts.py): compatibility imports and the runnable example.
+- [src/contracts.py](src/contracts.py): compatibility imports and the runnable example.
   Both `from contracts import Model` and `from pinn_engine import Model` resolve
   to the same class. Existing notebook imports remain valid.
 - [Temperature_Tutorial.ipynb](Temperature_Tutorial.ipynb): a DeepONet temperature
