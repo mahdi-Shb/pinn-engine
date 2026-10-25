@@ -1,19 +1,18 @@
-"""Symbolic derivative requests, path planning, and the numerical backend boundary.
+"""Symbolic first derivatives, backend-independent planning, and coordination.
 
-Numerical differentiation is deliberately unimplemented. Keep derivative-specific
-changes here; Solver delegates to these functions while retaining its override hooks.
-Imports of Solver and Value are type-only to avoid circular runtime imports.
+Numerical execution is selected through DerivativeBackend. Autograd-specific
+capability checks, tape creation, and gradient mode live in _autograd.py.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING, Sequence
 from .geometry import Geometry
 from .quantities import Quantity
+from .derivative_backends import resolve_backend
 
 if TYPE_CHECKING:
-    from .solver import Solver
-    from .values import Value
+    from ._graph import ComputationGraph
 
 @dataclass(frozen=True, eq=False, init=False)
 class Derivative(Quantity):
@@ -26,8 +25,7 @@ class Derivative(Quantity):
 
     Intrinsic shape is a.shape + b.shape, output components first. Runtime
     sample axes are NOT guessed here. Independent mapped samples can align;
-    Solver validates that assumption before the default AD execution boundary.
-    Full coupled Jacobians and numerical derivative backends remain pending.
+    The selected numerical backend validates its own sample-axis capabilities.
     No component indexing or higher-order derivatives are supported yet.
     """
 
@@ -98,13 +96,13 @@ def _related_quantities(quantity: Quantity):
 
 @dataclass(frozen=True)
 class DerivativePlan:
-    """Describe the function to differentiate, without implementing its backend.
+    """Describe the source path and cut points for a derivative request.
 
     model_indices are dependency-ordered indices into Solver.models. Traversal
     stops at wrt and held quantities; their current values become function
     inputs. Other external inputs also remain fixed during this derivative.
     This is structural reachability, not proof of a nonzero numerical derivative.
-    A future backend must preserve the outer parameter-training graph.
+    Numerical backends are responsible for preserving training where supported.
     """
 
     derivative: Derivative
@@ -115,13 +113,13 @@ class DerivativePlan:
 
     @property
     def dependencies(self) -> tuple[Quantity, ...]:
-        # These values must exist before the derivative execution placeholder.
+        # These values must exist before grouped derivative execution.
         return tuple(dict.fromkeys((self.derivative.of, self.derivative.wrt,
                                     *(self.derivative.holding or ()))))
 
 
-def plan_derivative(solver: Solver, derivative: Derivative) -> DerivativePlan:
-    """Plan the source path using the hosting solver's dependency graph."""
+def plan_derivative(graph: ComputationGraph, derivative: Derivative) -> DerivativePlan:
+    """Plan the source path using the declared computation graph."""
     stops = {derivative.wrt, *(derivative.holding or ())}
     leaves, indices, visited = {}, [], set()
 
@@ -131,80 +129,101 @@ def plan_derivative(solver: Solver, derivative: Derivative) -> DerivativePlan:
         visited.add(quantity)
         if isinstance(quantity, Derivative):
             raise NotImplementedError("Differentiating paths containing derivatives is not implemented")
-        if quantity in stops or quantity not in solver._producers:
+        if quantity in stops or quantity not in graph.model_producers:
             leaves[quantity] = None
             return
-        index = solver._producers[quantity]
-        for required in solver.models[index].inputs:
+        index = graph.model_producers[quantity]
+        for required in graph.models[index].inputs:
             visit(required)
         if index not in indices:
             indices.append(index)
 
     visit(derivative.of)
     # Preserve global dependency order, including models with multiple outputs.
-    ordered = tuple(key for kind, key in solver._ordered
+    ordered = tuple(key for kind, key in graph.ordered
                     if kind == "model" and key in indices)
-    return DerivativePlan(derivative, solver._producers.get(derivative.of),
+    return DerivativePlan(derivative, graph.model_producers.get(derivative.of),
                           ordered, tuple(leaves), derivative.wrt in leaves)
 
 
-def evaluate_derivative(
-    solver: Solver, plan: DerivativePlan, values: Mapping[Quantity, Value],
-) -> Value:
-    """Default AD boundary; numerical differentiation is still unimplemented.
+class DerivativeEngine:
+    """Own derivative graph integration, plans, and backend coordination.
 
-    Re-evaluating paths at perturbed wrt values and preserving held values,
-    parameter gradients, and mapped/core-axis semantics are NOT implemented.
-    Do not return a zero, detached Tensor, or externally supplied substitute.
-    A future non-AD backend can override Solver._evaluate_derivative and apply
-    its own capability checks instead of the AD-only validation below.
+    The host supplies a computation graph plus two callbacks: run a model, and
+    store validated values. No nn.Module registration or mutable runtime state
+    is retained here. The numerical backend never needs the hosting Solver.
     """
-    solver.validate_autograd(plan, values)
-    raise NotImplementedError(
-        f"Derivative execution is not implemented: {plan.derivative.name}; "
-        f"source model indices={plan.model_indices}"
-    )
 
+    def __init__(self, chunk_size=64, *, backend="autograd"):
+        self.backend = resolve_backend(backend)
+        self.chunk_size = chunk_size
+        self.requests = ()
+        self.plans = {}
 
-def validate_autograd(
-    solver: Solver, plan: DerivativePlan, values: Mapping[Quantity, Value],
-) -> None:
-    """Reject unsupported alignment of dependent samples for this AD request.
+    @property
+    def chunk_size(self):
+        return self._chunk_size
 
-    values contains the current source values, including of and wrt. Their
-    layouts tell us which axes an independent-sample AD backend would align.
-    Consuming any such axis on a wrt-dependent path removes that guarantee.
-    This is conservative: evaluate's internals are not inspected.
+    @chunk_size.setter
+    def chunk_size(self, size):
+        if type(size) is not int or size < 1:
+            raise ValueError("derivative_chunk_size must be a positive integer")
+        self._chunk_size = size
 
-    A reduction to a scalar has no shared sample axis and remains legal.
-    A reduction followed by broadcasting back onto that axis is not legal.
-    Held and wrt-independent branches do not count as differentiated paths.
-    This check does not detach values or restrict ordinary loss.backward().
-    """
-    derivative = plan.derivative
-    shared = set(values[derivative.of].axes) & set(values[derivative.wrt].axes)
-    if not shared or not plan.depends_on_wrt:
-        return
+    def install(self, graph, requested_outputs):
+        """Discover requests and register their virtual producer nodes."""
+        requests = {}
+        for model in graph.models:
+            for quantity in model.outputs:
+                if isinstance(quantity, Derivative):
+                    raise ValueError("Derivative quantities are produced by Solver, not by Models")
+            for quantity in (*model.inputs, *model.outputs):
+                self._collect(graph, quantity, requests)
+        for quantity in requested_outputs or ():
+            if not isinstance(quantity, Quantity):
+                raise TypeError("Solver outputs must be Quantity objects")
+            self._collect(graph, quantity, requests)
+        self.requests = tuple(requests)
+        for derivative in self.requests:
+            graph.add_node(("derivative", derivative), self.dependencies(derivative), (derivative,))
 
-    # model_indices also contains branches needed to evaluate constants.
-    # Only propagate coordinate dependence from wrt, stopping at holding.
-    dependent = {derivative.wrt}
-    held = set(derivative.holding or ())
-    for index in plan.model_indices:
-        model = solver.models[index]
-        signature = model.signature
-        active_inputs = [q for q in signature.inputs if q in dependent]
-        if not active_inputs:
-            continue
-        consumed = {axis for q in active_inputs for axis in signature.inputs[q]}
-        unsupported = shared & consumed
-        if unsupported:
-            raise NotImplementedError(
-                f"Autograd across non-independent sample axes is not supported: "
-                f"{sorted(unsupported)}; model {index} ({type(model).__name__}) "
-                f"consumes these axes on the path for {derivative.name}. "
-                "For independent computation, leave mapped axes out of the "
-                "signature; otherwise use a suitable non-AD backend or an "
-                "appropriate partial derivative with holding."
-            )
-        dependent.update(q for q in signature.outputs if q not in held)
+    @staticmethod
+    def _collect(graph, quantity, requests):
+        for related in _related_quantities(quantity):
+            graph.register_quantity(related)
+        if isinstance(quantity, Derivative):
+            requests[quantity] = None
+
+    @staticmethod
+    def dependencies(derivative):
+        return tuple(dict.fromkeys((derivative.of, derivative.wrt, *(derivative.holding or ()))))
+
+    def build_plans(self, graph):
+        """Resolve paths only after the complete graph has been ordered."""
+        self.plans = {request: plan_derivative(graph, request) for request in self.requests}
+
+    def execute(self, graph, needed, values, run_model, store):
+        """Handle a derivative call; return False for ordinary host execution."""
+        plans = [self.plans[key] for kind, key in graph.ordered
+                 if kind == "derivative" and (kind, key) in needed]
+        if not plans:
+            return False
+
+        self.backend.execute(graph, plans, needed, values, run_model, store, self.chunk_size)
+        return True
+
+    def validate(self, graph, plan, values):
+        self.backend.validate(graph, plan, values)
+
+    def node_id(self, node):
+        return f"d{self.requests.index(node[1])}"
+
+    @staticmethod
+    def graph_inputs(derivative):
+        yield derivative.of, "of"
+        yield derivative.wrt, "wrt"
+        for quantity in derivative.holding or ():
+            yield quantity, "holding"
+
+    def graph_detail(self, derivative):
+        return f"source models: {self.plans[derivative].model_indices}; {self.backend.description}"

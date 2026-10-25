@@ -6,7 +6,7 @@ Implementation lives in pinn_engine/; no class definitions are duplicated here.
 
 from pinn_engine import (
     Axis, Geometry, Quantity, Field, Value, Signature, Model,
-    Derivative, TotalDerivative, PartialDerivative, DerivativePlan, Solver,
+    Derivative, TotalDerivative, PartialDerivative, DerivativePlan, DerivativeBackend, Solver,
 )
 from pinn_engine import __all__
 
@@ -35,7 +35,7 @@ def _example() -> None:
         def evaluate(self, values):
             return {loss: values[prediction].square().mean()}
 
-    solver = Solver([Loss(), Predict()], outputs=loss)
+    solver = Solver([Loss(), Predict()], outputs=loss, derivative_backend="autograd")
     result = solver({x: Value(torch.rand(3, 2), ("scenario", "point"))})
     result[loss].tensor.backward()
     print("Loss shape:", tuple(result[loss].tensor.shape))

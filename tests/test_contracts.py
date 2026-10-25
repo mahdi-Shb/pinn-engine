@@ -1,4 +1,4 @@
-"""Standalone contract checks; numerical derivative backends stay absent."""
+"""Declarations, derivative planning, AD restrictions, and numerical execution."""
 
 import pytest
 import torch
@@ -115,10 +115,11 @@ def test_ad_checks_only_wrt_dependent_paths_and_respects_holding(held, independe
 
     # A downstream pointwise model cannot undo upstream coordinate coupling.
     # Holding z or sourcing z independently of x removes that AD path.
-    message = ("Derivative execution is not implemented" if held or independent_source
-               else "Autograd across non-independent sample axes")
-    with pytest.raises(NotImplementedError, match=message):
-        solver(values)
+    if not held and not independent_source:
+        with pytest.raises(NotImplementedError, match="non-independent sample axes"):
+            solver(values)
+    else:
+        torch.testing.assert_close(solver(values)[request].tensor, torch.full_like(tensor, 2.))
 
 
 def test_reduction_is_legal_but_rebroadcasting_it_does_not_restore_independence():
@@ -145,10 +146,8 @@ def test_reduction_is_legal_but_rebroadcasting_it_does_not_restore_independence(
     values = {x: Value(torch.tensor([1., 2., 4.]), "point")}
     with pytest.raises(NotImplementedError, match="non-independent sample axes"):
         solver(values, outputs=total)
-    for request in (partial, reduced):
-        # Both pass the capability check and reach the unfinished numeric backend.
-        with pytest.raises(NotImplementedError, match="Derivative execution is not implemented"):
-            solver(values, outputs=request)
+    torch.testing.assert_close(solver(values, outputs=partial)[partial].tensor, torch.ones(3))
+    torch.testing.assert_close(solver(values, outputs=reduced)[reduced].tensor, torch.full((3,), 1/3))
 
 
 def test_point_coupling_does_not_block_ad_of_an_independent_scenario_parameter():
@@ -170,8 +169,8 @@ def test_point_coupling_does_not_block_ad_of_an_independent_scenario_parameter()
     }
     with pytest.raises(NotImplementedError, match="non-independent sample axes"):
         solver(values, outputs=spatial)
-    with pytest.raises(NotImplementedError, match="Derivative execution is not implemented"):
-        solver(values, outputs=scenario)
+    result = solver(values, outputs=scenario)[scenario]
+    torch.testing.assert_close(result.tensor, values[x].tensor - values[x].tensor.mean(dim=1, keepdim=True))
 
 
 def make_paths():
@@ -227,9 +226,8 @@ def test_solver_plans_total_and_partial_paths_and_keeps_derivatives_internal():
     result.tensor.sum().backward()
     torch.testing.assert_close(tensor.grad, 2 + 4 * tensor)
     assert solver.models[1].weight.grad is not None
-    # The physics path may NOT silently use zeros or an injected derivative.
-    with pytest.raises(NotImplementedError, match="Derivative execution"):
-        solver({x: Value(tensor, "point")})
+    # The residual uses real total and partial derivatives.
+    torch.testing.assert_close(solver({x: Value(tensor, "point")})[residual].tensor, 4 * tensor)
     with pytest.raises(ValueError, match="Expected input"):
         solver({x: Value(tensor, "point"), total: Value(tensor, "point")})
 
@@ -244,7 +242,7 @@ def test_derivative_graph_contains_source_wrt_hold_and_residual_edges():
     dot = solver.to_dot()
     assert 'm1 -> d0' in dot and 'i0 -> d0' in dot
     assert 'm2 -> d1' in dot and 'd0 -> m0' in dot and 'd1 -> m0' in dot
-    assert 'execution not implemented' in dot.replace('<BR/>', ' ')
+    assert 'local reverse-mode AD' in dot.replace('<BR/>', ' ')
 
 
 def test_direct_derivative_output_and_intermediate_wrt_are_planned():
@@ -257,8 +255,7 @@ def test_direct_derivative_output_and_intermediate_wrt_are_planned():
     assert plan.function_inputs == (x, z)
     assert graph.inputs == (x,)
     assert 'd0 --> o0' in graph.to_mermaid()
-    with pytest.raises(NotImplementedError, match="Derivative execution"):
-        graph({x: Value(torch.tensor(2.))})
+    torch.testing.assert_close(graph({x: Value(torch.tensor(2.))})[request].tensor, torch.tensor(2.))
 
 
 def test_derivative_only_hold_path_is_structurally_independent():

@@ -31,10 +31,15 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
   - `quantities.py`: `Quantity` and `Field` declarations.
   - `values.py`: `Value`, named axes, and runtime shape checks.
   - `model.py`: `Signature`, abstract `Model`, and automatic `vmap`.
-  - `derivatives.py`: symbolic derivatives, derivative plans, AD checks, and the
-    numerical derivative execution boundary.
-  - `solver.py`: graph wiring, execution, and visualization; derivative-specific
-    work is delegated to `derivatives.py`.
+  - `solver.py`: the nn.Module host, runtime value checks, and public API.
+  - `_graph.py`: dependency metadata, producer registration, ordering, and selection.
+  - `derivatives.py`: derivative declarations and DerivativeEngine, which owns
+    virtual nodes, backend-independent plans, and request coordination.
+  - `derivative_backends.py`: the small DerivativeBackend execution interface
+    and explicit method selection.
+  - `_autograd.py`: AutogradBackend, its AD checks and gradient-mode handling,
+    per-call forward tape, and grouped local VJPs; independent of Solver.
+  - `_visualization.py`: Mermaid/DOT rendering and Graphviz file output.
 - [src/contracts.py](src/contracts.py): compatibility imports and the runnable example.
   Both `from contracts import Model` and `from pinn_engine import Model` resolve
   to the same class. Existing notebook imports remain valid.
@@ -55,14 +60,31 @@ of Tensors for a named outer geometry axis with variable-size members. Models
 either consume that list in full or run per geometry; common dense axes can
 still use `vmap`. This representation adds no padding or parallel job scheduling.
 
-Numerical derivative execution is intentionally **not implemented**. The default
-AD boundary rejects requests that would incorrectly assume independence along
-a coupled shared sample axis. Scalar reductions, held branches, and branches
-independent of the differentiated input are treated separately. A physics loss
-that requests a derivative still raises `NotImplementedError`; the notebook
-catches that expected error and does not claim to solve the PDE with a PINN.
+Select the numerical method in the host constructor:
 
-Geometry compatibility beyond object identity, sampler implementations, numerical
-derivative backends, and cache policy remain open design work. The historical
+```python
+solver = Solver(models, outputs=loss, derivative_backend="autograd")
+```
+
+`autograd` is the default and currently the only implemented built-in method.
+Unknown or unimplemented names raise an error. A custom DerivativeBackend object
+can also be supplied; it owns its capability checks and runtime requirements.
+
+First-order total and partial derivatives are implemented with grouped local
+reverse-mode AD. Model inputs are recorded as distinct identity views during a
+single forward. Each request has independent `wrt` and `holding` stops; equal
+incoming adjoints share local VJPs across requests. Other directions are batched
+and chunked with `Solver(..., derivative_chunk_size=64)`. Derivatives remain
+connected to parameter training, including parameters producing held values.
+Shared independent sample axes are aligned without a full cross-sample Jacobian;
+distinct output/input axis names expose cross-axis Jacobians explicitly. Coupled
+shared sample axes are rejected. Real Tensor lists are supported as well.
+
+The notebook still trains on analytical data, then evaluates and backpropagates
+through the physics residual. It does not claim convergence from physics training.
+See [the AD contract](docs/contracts.fa.md) for scope and limitations.
+
+Geometry compatibility beyond object identity, sampler implementations, higher-order
+derivative requests, non-AD backends, and persistent cache policy remain open design work. The historical
 notes describe proposals as well as decisions; the current contract document and
 code describe the implemented behavior.
