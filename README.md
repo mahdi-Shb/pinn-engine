@@ -70,6 +70,27 @@ solver = Solver(models, outputs=loss, derivative_backend="autograd")
 Unknown or unimplemented names raise an error. A custom DerivativeBackend object
 can also be supplied; it owns its capability checks and runtime requirements.
 
+The inheritance tree is intentionally shallow:
+
+```text
+DerivativeBackend (abstract)
+└── AutogradBackend
+```
+
+Both classes are public imports. Supplying an object is equivalent to choosing
+the built-in method by name:
+
+```python
+from pinn_engine import AutogradBackend, DerivativeBackend, Solver
+
+solver = Solver(models, outputs=loss, derivative_backend=AutogradBackend())
+```
+
+Each backend implements `name` and `execute`; `validate` is optional. The base
+contract does not require a tape, a grid, or function replay. DerivativeEngine
+holds a backend rather than inheriting from it. Finite-difference, spectral,
+and FEM backends can be added as direct subclasses when they are implemented.
+
 First-order total and partial derivatives are implemented with grouped local
 reverse-mode AD. Model inputs are recorded as distinct identity views during a
 single forward. Each request has independent `wrt` and `holding` stops; equal

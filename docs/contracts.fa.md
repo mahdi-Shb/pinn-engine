@@ -75,3 +75,10 @@ Solver هنوز DerivativeEngine را هنگام ساخت و اجرا فراخو
 پارامتر derivative_backend در Solver.__init__ نام روش یا یک شیء DerivativeBackend می‌گیرد. مقدار پیش‌فرض autograd است و فعلاً فقط همین روش built-in پیاده شده است؛ نام‌های دیگر، از جمله fdm و spectral، صریحاً خطا می‌دهند. هیچ fallback خاموشی به AD وجود ندارد. solver.derivative_backend شیء backend منتخب را نشان می‌دهد.
 
 قرارداد کوچک DerivativeBackend در derivative_backends.py فقط اجرای درخواست‌ها از روی گراف و callbackها را لازم می‌کند؛ دریافت تابع، دادهٔ نمونه‌برداری یا tape در آن اجباری نشده است. AutogradBackend الزامات خودش را در _autograd.py نگه می‌دارد. backend سفارشی مسئول درستی total/partial، holding، شکل خروجی و حفظ آموزش در محدودهٔ قابلیت‌های خودش است. متد قدیمی Solver.validate_autograd برای سازگاری باقی مانده و بررسی backend منتخب را واگذار می‌کند.
+
+
+## ارث‌بری روش‌های عددی
+
+ساختار فعلی یک پایهٔ انتزاعی DerivativeBackend و یک فرزند اجرایی AutogradBackend دارد. هر دو از pinn_engine و مسیر سازگار contracts قابل import هستند. فرزند باید name و execute را ارائه کند؛ validate اختیاری است و فقط محدودیت‌های همان روش را بررسی می‌کند. کلاس پایه tape، grid یا اجرای دوبارهٔ تابع را لازم نمی‌کند. DerivativeEngine از backend ارث نمی‌برد، بلکه نمونهٔ آن را نگه می‌دارد.
+
+می‌توان در Solver نام autograd یا شیء AutogradBackend() را داد. روش‌های finite difference، spectral و FEM هنگام پیاده‌سازی فرزند مستقیم همین پایه خواهند بود؛ کلاس واسط GridBackend یا FunctionBackend فعلاً اضافه نشده است.
