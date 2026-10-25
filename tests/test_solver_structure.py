@@ -41,7 +41,7 @@ def test_derivative_engine_runs_without_a_solver_instance():
     graph, engine = ComputationGraph(models), DerivativeEngine()
     engine.install(graph, (request,))
     graph.finalize((request,))
-    engine.build_plans(graph)
+    engine.prepare(graph)
     values = {x: Value(torch.tensor([1., 2.]), "point")}
     calls = []
 
@@ -143,10 +143,11 @@ def test_custom_backend_is_not_forced_to_use_autograd_rules_or_a_tape():
 
         name = "analytic-square"
 
-        def execute(self, graph, plans, needed, values, run_model, store, chunk_size):
+        def execute(self, graph, requests, needed, values, run_model, store, chunk_size, *, preparation=None):
             assert not torch.is_grad_enabled()
             run_model(graph.model_producers[y])
-            store({plan.derivative: Value(2 * values[x].tensor, values[x].axes) for plan in plans})
+            assert preparation == {}
+            store({request: Value(2 * values[x].tensor, values[x].axes) for request in requests})
 
     points = torch.tensor([1., 2.])
     solver = Solver([Square()], outputs=request, derivative_backend=AnalyticSquare())

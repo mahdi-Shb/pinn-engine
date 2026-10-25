@@ -35,7 +35,7 @@ class Solver(nn.Module):
         )
         self._derivative_engine.install(self._graph, requested)
         self._graph.finalize(requested)
-        self._derivative_engine.build_plans(self._graph)
+        self._derivative_engine.prepare(self._graph)
         # Keep existing state_dict names and ordinary nn.Module behavior.
         self.models = self._graph.models
         for index, model in enumerate(self.models):
@@ -62,6 +62,10 @@ class Solver(nn.Module):
         return self._derivative_engine.plans
 
     @property
+    def derivative_preparation(self):
+        return self._derivative_engine.preparation
+
+    @property
     def derivative_backend(self):
         return self._derivative_engine.backend
 
@@ -75,7 +79,7 @@ class Solver(nn.Module):
 
     def validate_autograd(self, plan, values):
         """Compatibility alias for the selected backend capability check."""
-        self._derivative_engine.validate(self._graph, plan, values)
+        self._derivative_engine.validate(self._graph, plan.derivative, values)
 
     def forward(
         self, values: Mapping[Quantity, Value], *,
@@ -155,6 +159,5 @@ class Solver(nn.Module):
     def _graph_quantity_label(self, quantity):
         return _visualization.quantity_label(self._graph, quantity)
 
-    @staticmethod
-    def _derivative_graph_inputs(derivative):
-        return DerivativeEngine.graph_inputs(derivative)
+    def _derivative_graph_inputs(self, derivative):
+        return self._derivative_engine.graph_inputs(derivative)

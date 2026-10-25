@@ -1,7 +1,7 @@
 """Small execution interface for numerical derivative methods.
 
-Declarations and graph plans do not choose an algorithm. A backend owns its
-runtime requirements, capability checks, and execution against that graph.
+A backend declares the values it needs and optionally prepares method-specific
+metadata. Model-path plans, tapes, grids, and meshes are never mandatory here.
 """
 
 from abc import ABC, abstractmethod
@@ -20,13 +20,39 @@ class DerivativeBackend(ABC):
     def description(self) -> str:
         return self.name
 
-    def validate(self, graph, plan, values):
+    def dependencies(self, graph, request):
+        """Default to sampled output/input values; add mesh/grid data as needed.
+
+        Callable-based methods may need different values, including held inputs.
+        Requirements are registered as graph edges before ordering the graph.
+        """
+        return tuple(dict.fromkeys((request.of, request.wrt)))
+
+    def prepare(self, graph, requests):
+        """Optional static preparation, owned by this method; no paths by default.
+
+        Return a metadata mapping. Values need not be DerivativePlan objects.
+        This is called after graph ordering, without evaluating models.
+        """
+        return {}
+
+    def path_plans(self, preparation):
+        """Optional inspection view for path-aware methods; empty otherwise."""
+        return {}
+
+    def validate(self, graph, request, values, *, preparation=None):
         """Optionally reject requests this backend cannot interpret correctly."""
 
+    def describe_request(self, request, *, preparation):
+        """Supply diagram details without requiring model-path metadata."""
+        return self.description
+
     @abstractmethod
-    def execute(self, graph, plans, needed, values, run_model, store, chunk_size):
+    def execute(self, graph, requests, needed, values, run_model, store, chunk_size, *, preparation=None):
         """Compute requests and their consumers through the host callbacks.
 
+        requests contains raw Derivative declarations. preparation contains only
+        what this backend's optional prepare returned, possibly an empty mapping.
         run_model(index, call=None) executes and validates a model; an optional
         call adapter can record its inputs. store(mapping) validates and stores
         computed Values. Neither callback exposes the hosting Solver.

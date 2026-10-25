@@ -19,7 +19,7 @@ from .derivative_backends import DerivativeBackend
 
 if TYPE_CHECKING:
     from ._graph import ComputationGraph
-    from .derivatives import DerivativePlan
+    from .derivative_paths import DerivativePlan
     from .quantities import Quantity
 
 
@@ -342,15 +342,32 @@ class AutogradBackend(DerivativeBackend):
     name = "autograd"
     description = "local reverse-mode AD"
 
-    def validate(self, graph, plan, values):
+    def dependencies(self, graph, request):
+        return tuple(dict.fromkeys((request.of, request.wrt, *(request.holding or ()))))
+
+    def prepare(self, graph, requests):
+        from .derivative_paths import plan_derivative
+        return {request: plan_derivative(graph, request) for request in requests}
+
+    def path_plans(self, preparation):
+        return preparation
+
+    def validate(self, graph, request, values, *, preparation=None):
+        plan = preparation[request] if preparation is not None else self.prepare(graph, (request,))[request]
         validate_autograd(graph, plan, values)
 
-    def execute(self, graph, plans, needed, values, run_model, store, chunk_size):
+    def describe_request(self, request, *, preparation):
+        return f"source models: {preparation[request].model_indices}; {self.description}"
+
+    def execute(self, graph, requests, needed, values, run_model, store, chunk_size, *, preparation=None):
+        plans = [preparation[request] for request in requests]
         if torch.is_inference_mode_enabled():
             raise RuntimeError("Derivative requests cannot run under torch.inference_mode(); use torch.no_grad() instead")
         trace = ForwardTrace()
         recorded = {index for plan in plans for index in plan.model_indices}
-        prerequisites = graph.needed_nodes(tuple(q for plan in plans for q in plan.dependencies))
+        prerequisites = graph.needed_nodes(tuple(
+            q for request in requests for q in graph.dependencies[("derivative", request)]
+        ))
         if any(kind == "derivative" for kind, _ in prerequisites):
             raise NotImplementedError("Differentiating paths containing derivatives is not implemented")
         with torch.enable_grad():
@@ -358,8 +375,8 @@ class AutogradBackend(DerivativeBackend):
             for kind, index in graph.ordered:
                 if (kind, index) in prerequisites:
                     run_model(index, trace.run if index in recorded else None)
-            for plan in plans:
-                self.validate(graph, plan, values)
+            for request in requests:
+                self.validate(graph, request, values, preparation=preparation)
             store(execute(graph, plans, values, trace, chunk_size))
             for kind, index in graph.ordered:
                 if kind == "model" and (kind, index) in needed and (kind, index) not in prerequisites:

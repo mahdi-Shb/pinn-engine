@@ -34,7 +34,8 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
   - `solver.py`: the nn.Module host, runtime value checks, and public API.
   - `_graph.py`: dependency metadata, producer registration, ordering, and selection.
   - `derivatives.py`: derivative declarations and DerivativeEngine, which owns
-    virtual nodes, backend-independent plans, and request coordination.
+    virtual nodes, backend-declared requirements, and request coordination.
+  - `derivative_paths.py`: optional model-path analysis used by AutogradBackend.
   - `derivative_backends.py`: the small DerivativeBackend execution interface
     and explicit method selection.
   - `_autograd.py`: AutogradBackend, its AD checks and gradient-mode handling,
@@ -86,10 +87,26 @@ from pinn_engine import AutogradBackend, DerivativeBackend, Solver
 solver = Solver(models, outputs=loss, derivative_backend=AutogradBackend())
 ```
 
-Each backend implements `name` and `execute`; `validate` is optional. The base
-contract does not require a tape, a grid, or function replay. DerivativeEngine
-holds a backend rather than inheriting from it. Finite-difference, spectral,
-and FEM backends can be added as direct subclasses when they are implemented.
+Each backend implements `name` and `execute`. Optional `dependencies(graph,
+request)` declares required values (default: `of` and `wrt`); a mesh-based method
+can add connectivity, while an analytical method can omit the primal output.
+Optional `prepare(graph, requests)` returns static method-specific metadata;
+the default is an empty mapping and performs no model-path analysis. Runtime
+mesh/grid-dependent work belongs in `execute`, after values become available.
+`execute` receives raw derivative requests and its own `preparation` keyword.
+`validate` can reject unsupported requests, including unsupported holding rules.
+
+`solver.derivative_preparation` exposes that metadata. `solver.derivative_plans`
+is an optional path inspection view: AutogradBackend supplies it through
+`path_plans`; value-based backends leave it empty. Graph diagrams show the actual
+declared requirements, including extra mesh/grid inputs. Solver still declares
+external inputs for the entire model graph; skipping a source forward does not
+change that input contract.
+
+DerivativeEngine holds a backend rather than inheriting from it. The base
+contract requires no tape, grid, function replay, or model-path plan.
+Finite-difference, spectral, and FEM backends can be added as direct subclasses
+when they are implemented; these numerical methods are not included yet.
 
 First-order total and partial derivatives are implemented with grouped local
 reverse-mode AD. Model inputs are recorded as distinct identity views during a

@@ -1,4 +1,4 @@
-"""Symbolic first derivatives, backend-independent planning, and coordination.
+"""Symbolic first derivatives, backend requirements, and request coordination.
 
 Numerical execution is selected through DerivativeBackend. Autograd-specific
 capability checks, tape creation, and gradient mode live in _autograd.py.
@@ -6,13 +6,11 @@ capability checks, tape creation, and gradient mode live in _autograd.py.
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Sequence
+from typing import Sequence
 from .geometry import Geometry
 from .quantities import Quantity
 from .derivative_backends import resolve_backend
-
-if TYPE_CHECKING:
-    from ._graph import ComputationGraph
+from .derivative_paths import DerivativePlan  # Compatibility export, not mandatory planning.
 
 @dataclass(frozen=True, eq=False, init=False)
 class Derivative(Quantity):
@@ -94,60 +92,8 @@ def _related_quantities(quantity: Quantity):
         yield from quantity.holding or ()
 
 
-@dataclass(frozen=True)
-class DerivativePlan:
-    """Describe the source path and cut points for a derivative request.
-
-    model_indices are dependency-ordered indices into Solver.models. Traversal
-    stops at wrt and held quantities; their current values become function
-    inputs. Other external inputs also remain fixed during this derivative.
-    This is structural reachability, not proof of a nonzero numerical derivative.
-    Numerical backends are responsible for preserving training where supported.
-    """
-
-    derivative: Derivative
-    producer_index: int | None
-    model_indices: tuple[int, ...]
-    function_inputs: tuple[Quantity, ...]
-    depends_on_wrt: bool
-
-    @property
-    def dependencies(self) -> tuple[Quantity, ...]:
-        # These values must exist before grouped derivative execution.
-        return tuple(dict.fromkeys((self.derivative.of, self.derivative.wrt,
-                                    *(self.derivative.holding or ()))))
-
-
-def plan_derivative(graph: ComputationGraph, derivative: Derivative) -> DerivativePlan:
-    """Plan the source path using the declared computation graph."""
-    stops = {derivative.wrt, *(derivative.holding or ())}
-    leaves, indices, visited = {}, [], set()
-
-    def visit(quantity):
-        if quantity in visited:
-            return
-        visited.add(quantity)
-        if isinstance(quantity, Derivative):
-            raise NotImplementedError("Differentiating paths containing derivatives is not implemented")
-        if quantity in stops or quantity not in graph.model_producers:
-            leaves[quantity] = None
-            return
-        index = graph.model_producers[quantity]
-        for required in graph.models[index].inputs:
-            visit(required)
-        if index not in indices:
-            indices.append(index)
-
-    visit(derivative.of)
-    # Preserve global dependency order, including models with multiple outputs.
-    ordered = tuple(key for kind, key in graph.ordered
-                    if kind == "model" and key in indices)
-    return DerivativePlan(derivative, graph.model_producers.get(derivative.of),
-                          ordered, tuple(leaves), derivative.wrt in leaves)
-
-
 class DerivativeEngine:
-    """Own derivative graph integration, plans, and backend coordination.
+    """Own derivative graph integration, requirements, and backend coordination.
 
     The host supplies a computation graph plus two callbacks: run a model, and
     store validated values. No nn.Module registration or mutable runtime state
@@ -158,7 +104,13 @@ class DerivativeEngine:
         self.backend = resolve_backend(backend)
         self.chunk_size = chunk_size
         self.requests = ()
-        self.plans = {}
+        self.preparation = {}
+        self.requirements = {}
+
+    @property
+    def plans(self):
+        """Compatibility inspection of paths, without interpreting backend data."""
+        return self.backend.path_plans(self.preparation)
 
     @property
     def chunk_size(self):
@@ -184,6 +136,10 @@ class DerivativeEngine:
                 raise TypeError("Solver outputs must be Quantity objects")
             self._collect(graph, quantity, requests)
         self.requests = tuple(requests)
+        self.requirements = {
+            request: tuple(dict.fromkeys(self.backend.dependencies(graph, request)))
+            for request in self.requests
+        }
         for derivative in self.requests:
             graph.add_node(("derivative", derivative), self.dependencies(derivative), (derivative,))
 
@@ -194,36 +150,42 @@ class DerivativeEngine:
         if isinstance(quantity, Derivative):
             requests[quantity] = None
 
-    @staticmethod
-    def dependencies(derivative):
-        return tuple(dict.fromkeys((derivative.of, derivative.wrt, *(derivative.holding or ()))))
+    def dependencies(self, derivative):
+        return self.requirements[derivative]
 
-    def build_plans(self, graph):
-        """Resolve paths only after the complete graph has been ordered."""
-        self.plans = {request: plan_derivative(graph, request) for request in self.requests}
+    def prepare(self, graph):
+        """Keep backend-owned preparation; the default does no model-path work."""
+        self.preparation = self.backend.prepare(graph, self.requests)
 
     def execute(self, graph, needed, values, run_model, store):
         """Handle a derivative call; return False for ordinary host execution."""
-        plans = [self.plans[key] for kind, key in graph.ordered
+        requests = [key for kind, key in graph.ordered
                  if kind == "derivative" and (kind, key) in needed]
-        if not plans:
+        if not requests:
             return False
 
-        self.backend.execute(graph, plans, needed, values, run_model, store, self.chunk_size)
+        self.backend.execute(graph, requests, needed, values, run_model, store,
+                             self.chunk_size, preparation=self.preparation)
         return True
 
-    def validate(self, graph, plan, values):
-        self.backend.validate(graph, plan, values)
+    def validate(self, graph, request, values):
+        self.backend.validate(graph, request, values, preparation=self.preparation)
 
     def node_id(self, node):
         return f"d{self.requests.index(node[1])}"
 
-    @staticmethod
-    def graph_inputs(derivative):
-        yield derivative.of, "of"
-        yield derivative.wrt, "wrt"
-        for quantity in derivative.holding or ():
-            yield quantity, "holding"
+    def graph_inputs(self, derivative):
+        """Render only actual backend requirements, including additional data."""
+        required = self.requirements[derivative]
+        roles = [(derivative.of, "of"), (derivative.wrt, "wrt")]
+        roles.extend((q, "holding") for q in derivative.holding or ())
+        for quantity, role in roles:
+            if quantity in required:
+                yield quantity, role
+        named = {q for q, _ in roles}
+        for quantity in required:
+            if quantity not in named:
+                yield quantity, "input"
 
     def graph_detail(self, derivative):
-        return f"source models: {self.plans[derivative].model_indices}; {self.backend.description}"
+        return self.backend.describe_request(derivative, preparation=self.preparation)
