@@ -9,7 +9,8 @@
 
 این فایل‌ها تاریخچهٔ بحث و پیشنهادها را نگه می‌دارند؛ همهٔ پیشنهادهای آن‌ها API فعلی نیستند.
 
-- [تصمیم‌های باز](architecture_open_decisions.fa.md)
+- [یادداشت طراحی، تاریخچه و طرح‌های توسعه](architecture_open_decisions.fa.md)
+- [طرح توسعهٔ multi-domain geometry، partial AD و کنترل گراف](architecture_open_decisions.fa.md#multi-domain-geometry-and-partial-ad): ایده‌های نسبتاً مشخص برای پیاده‌سازی بعدی، همراه با تجربه و محدودهٔ branch محفوظ؛ این‌ها تصمیم‌های معوق نیستند.
 - [پیشنهاد قرارداد batch](model_batch_contract_proposal.fa.md)
 - [پیشنهاد حداقلی sampler](sampler_minimal_proposal.fa.md)
 - [بررسی پژوهشی وابستگی نقاط و مشتق‌گیری](research/same_coordinate_coupling.fa.md)
