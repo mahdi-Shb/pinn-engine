@@ -9,7 +9,6 @@ from pinn_engine import AutogradBackend, Derivative, Model, Quantity, Signature,
 
 
 class Function(Model):
-    geometry = None
 
     def __init__(self, inputs, outputs, fn, calls=None, name="forward"):
         super().__init__()
@@ -178,7 +177,7 @@ def test_ragged_second_derivative_and_real_outputs_through_complex_operations():
     model = Function({x: ()}, {y: ()}, lambda v: {y: ((1+2j)*v[x]**2).abs().square()})
     second = Derivative(Derivative(y, x), x)
     points = [torch.tensor([0.2, 0.7]), torch.tensor([0.4])]
-    result = Solver([model], outputs=second)({x: Value(points, ("geometry", "point"))})[second]
-    assert result.axes == ("geometry", "point")
+    result = Solver([model], outputs=second)({x: Value(points, ("case", "point"))})[second]
+    assert result.axes == ("case", "point")
     for actual, point in zip(result.tensor, points):
         torch.testing.assert_close(actual, 60*point.square())

@@ -167,7 +167,7 @@ class AutogradBackend(DerivativeBackend):
     @staticmethod
     def _check_values(request, values):
         if request.holding:
-            raise NotImplementedError("Direct AD does not support nonempty holding; use the partial-derivatives branch")
+            raise NotImplementedError("Direct AD does not support nonempty holding; use the partial-derivative-and-geometry-domain-support branch")
         for quantity in (request.of, request.wrt):
             if any(not t.is_floating_point() for t in _leaves(values[quantity])):
                 raise TypeError("Derivative operands must contain real floating-point Tensors")

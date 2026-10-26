@@ -15,14 +15,12 @@ def make_models():
     x, z, y = map(Quantity, ("x", "z", "y"))
 
     class Encode(Model):
-        geometry = None
         signature = Signature({x: ()}, {z: ()})
 
         def evaluate(self, values):
             return {z: values[x].square()}
 
     class Predict(Model):
-        geometry = None
         signature = Signature({x: (), z: ()}, {y: ()})
 
         def __init__(self):
@@ -131,7 +129,6 @@ def test_custom_backend_is_not_forced_to_use_autograd_rules_or_a_tape():
     request = Derivative(y, x)
 
     class Square(Model):
-        geometry = None
         signature = Signature({x: "point"}, {y: "point"})
 
         def evaluate(self, values):

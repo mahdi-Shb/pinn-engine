@@ -1,16 +1,15 @@
 """Semantic quantity declarations, independent of runtime data and execution."""
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from .geometry import Geometry
+from dataclasses import dataclass
 
 @dataclass(frozen=True, eq=False)
 class Quantity:
-    """Declare a nonspatial quantity without a runtime value, version, or cache.
+    """Declare a quantity without a runtime value, version, or cache.
 
     shape is intrinsic: scalar (), vector (3,), stress tensor (3, 3).
     Scenario and point counts are excluded from shape.
-    Definitions with the same name and domain identify the same dictionary key.
+    Definitions with the same name identify the same dictionary key.
     Construct new instances freely; there is no global registry or get factory.
     Signature checks shape consistency when declarations are used together.
     """
@@ -28,16 +27,9 @@ class Quantity:
         object.__setattr__(self, "shape", shape)
 
     @property
-    def _domain(self) -> Geometry | None:
-        # Nonspatial quantities have no domain; Field overrides this property.
-        return None
-
-    @property
     def _identity(self) -> tuple:
-        # Geometry identity currently means the same object, regardless of shape
-        # equality or whether two geometries belong to the same class.
-        domain = self._domain
-        return (None if domain is None else id(domain), self.name)
+        # Shape consistency is checked separately when declarations meet.
+        return ("quantity", self.name)
 
     def __hash__(self) -> int:
         return hash(self._identity)
@@ -46,23 +38,3 @@ class Quantity:
         if not isinstance(other, Quantity):
             return NotImplemented
         return self._identity == other._identity
-
-
-@dataclass(frozen=True, eq=False)
-class Field(Quantity):
-    """A spatial quantity whose values are defined at points of a geometry.
-
-    Example: Field("T", shape=(), geometry=solid).
-    Reuse the same geometry object when redeclaring the same field.
-    """
-
-    geometry: Geometry = field(kw_only=True)
-
-    def __post_init__(self) -> None:
-        if self.geometry is None:
-            raise ValueError("Field.geometry is required")
-        super().__post_init__()
-
-    @property
-    def _domain(self) -> Geometry:
-        return self.geometry

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 import torch
 from torch import nn
-from .geometry import Geometry
 from .quantities import Quantity
 from .values import Value, _axes, _check_value
 from .derivatives import _related_quantities
@@ -92,24 +91,14 @@ class Model(nn.Module, ABC):
     forward accepts Value objects and handles extra axes automatically.
     Call model(values) to preserve PyTorch hooks. Subclass constructors must call
     super().__init__() before assigning parameters or child modules.
-    Subclasses provide signature and geometry through properties or class
-    attributes. Their constructors are free to accept whatever they need.
+    Subclasses provide signature through a property or class attribute. Their
+    constructors are free to accept whatever they need.
     """
 
     @property
     @abstractmethod
     def signature(self) -> Signature:
         """Declare the inputs, outputs, and core axes of one function call."""
-        raise NotImplementedError
-
-    @property
-    @abstractmethod
-    def geometry(self) -> Geometry | None:
-        """Declare the execution domain, or None for a nonspatial model.
-
-        Compatibility checks with Field domains will use geometry relationships;
-        that validation is not implemented by this declaration-only skeleton.
-        """
         raise NotImplementedError
 
     @property
@@ -128,8 +117,8 @@ class Model(nn.Module, ABC):
     ) -> dict[Quantity, torch.Tensor | list[torch.Tensor]]:
         """Evaluate one call according to signature using the subclass algorithm.
 
-        For a pointwise call, each Field value has only its intrinsic shape.
-        For a full-point call, the point axis precedes the Field's intrinsic shape.
+        For a pointwise call, each Quantity value has only its intrinsic shape.
+        For a full-point call, the point axis precedes the Quantity's intrinsic shape.
         A full list axis must be first in that input's core signature. evaluate
         then receives a list of Tensors, without Value wrappers. A returned list
         likewise represents the first declared output core axis.
@@ -161,12 +150,12 @@ class Model(nn.Module, ABC):
             raise ValueError("Only one outer list axis is supported in a model call")
         list_axis = next(iter(list_axes), None)
         if list_axis in batch:
-            # Select a geometry before vectorizing its own dense sample axes.
-            # Other inputs may share that axis densely, or be shared by all geometries.
+            # Select a list member before vectorizing its own dense sample axes.
+            # Other inputs may share that axis densely, or be shared by all list members.
             return self._map_list_axis(values, list_axis, sizes[list_axis])
 
-        # A retained geometry list can be vmapped over common dense axes, but
-        # vmap cannot pair 20 points in one geometry with 40 in another.
+        # A retained Tensor list can be vmapped over common dense axes, but
+        # vmap cannot pair 20 points in one member with 40 in another.
         for axis in batch:
             length = sizes[axis]
             if isinstance(length, tuple) and len(set(length)) != 1:
@@ -226,7 +215,7 @@ class Model(nn.Module, ABC):
         return outputs
 
     def _map_list_axis(self, values, axis, count) -> dict[Quantity, Value]:
-        """Run one geometry at a time, keeping reference slices and autograd.
+        """Run one list member at a time, keeping reference slices and autograd.
 
         Output lists are deliberately not stacked, even if member sizes match.
         There is no padding, job scheduling, or implicit Cartesian matching.
@@ -248,7 +237,7 @@ class Model(nn.Module, ABC):
                 if isinstance(value.tensor, list):
                     raise ValueError("Nested output list axes are not supported")
                 if quantity in output_axes and output_axes[quantity] != value.axes:
-                    raise ValueError("Output axes must agree across geometries")
+                    raise ValueError("Output axes must agree across list members")
                 output_axes[quantity] = value.axes
                 collected.setdefault(quantity, []).append(value.tensor)
         return {q: Value(tensors, (axis,) + output_axes[q]) for q, tensors in collected.items()}

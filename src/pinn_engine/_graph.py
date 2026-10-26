@@ -20,17 +20,11 @@ class ComputationGraph:
         self.model_producers = {}
         self.dependencies = {}
         self.node_outputs = {}
-        self.geometry = None
         for index, model in enumerate(self.models):
             if not model.outputs:
                 raise ValueError("Each connected model must declare an output")
             self.add_node(("model", index), model.inputs, model.outputs)
             self.model_producers.update(dict.fromkeys(model.outputs, index))
-            # Geometry subset policy is still open; preserve object identity.
-            if model.geometry is not None:
-                if self.geometry is not None and model.geometry is not self.geometry:
-                    raise ValueError("Connected models must share one geometry object")
-                self.geometry = model.geometry
         self.default_outputs = tuple(self.producers)
 
     def register_quantity(self, quantity):

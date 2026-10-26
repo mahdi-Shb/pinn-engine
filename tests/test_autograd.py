@@ -9,7 +9,6 @@ from pinn_engine import Derivative, Model, Quantity, Signature, Solver, Value
 
 
 class Function(Model):
-    geometry = None
 
     def __init__(self, inputs, outputs, function, name=None, calls=None):
         super().__init__()
@@ -91,12 +90,12 @@ def test_ragged_values_and_shared_scenario_parameter_keep_training():
 
 def test_reducing_ragged_list_returns_derivative_on_input_list():
     x, energy = Quantity("x"), Quantity("energy")
-    model = Function({x: ("geometry", "point")}, {energy: ()},
+    model = Function({x: ("case", "point")}, {energy: ()},
                      lambda v: {energy: sum(t.square().sum() for t in v[x])})
     request = Derivative(energy, x)
     points = [torch.tensor([1., 2.]), torch.tensor([3.])]
-    result = Solver([model], outputs=request)({x: Value(points, ("geometry", "point"))})[request]
-    assert result.axes == ("geometry", "point")
+    result = Solver([model], outputs=request)({x: Value(points, ("case", "point"))})[request]
+    assert result.axes == ("case", "point")
     for actual, point in zip(result.tensor, points):
         torch.testing.assert_close(actual, 2 * point)
 

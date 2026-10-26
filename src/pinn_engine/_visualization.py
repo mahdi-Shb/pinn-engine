@@ -12,21 +12,8 @@ def source_node(graph, derivatives, quantity, external):
 
 
 def quantity_label(graph, quantity: Quantity) -> str:
-    """Disambiguate equal names on different domains without object ids."""
-    label = quantity.name
-    matches = [q for q in graph.quantities if q.name == quantity.name]
-    if len(matches) > 1:
-        domains = []
-        for q in matches:
-            if all(q._domain is not d for d in domains):
-                domains.append(q._domain)
-        if quantity._domain is None:
-            label += " [nonspatial]"
-        else:
-            number = next(i for i, d in enumerate(domains, 1)
-                          if d is quantity._domain)
-            label += f" [domain {number}]"
-    return label
+    """Return the semantic quantity name."""
+    return quantity.name
 
 
 def to_mermaid(graph, derivatives, direction: str = "LR") -> str:

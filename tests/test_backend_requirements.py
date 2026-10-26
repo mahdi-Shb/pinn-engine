@@ -10,7 +10,6 @@ def test_sampled_method_receives_mesh_produced_by_model_without_ad_or_paths():
     calls = []
 
     class Connectivity(Model):
-        geometry = None
         signature = Signature({x: "point"}, {cells: "cell"})
 
         def evaluate(self, values):
@@ -18,7 +17,6 @@ def test_sampled_method_receives_mesh_produced_by_model_without_ad_or_paths():
             return {cells: torch.tensor([[0, 1], [1, 2]])}
 
     class Loss(Model):
-        geometry = None
         signature = Signature({gradient: "cell"}, {loss: ()})
 
         def evaluate(self, values):
@@ -59,7 +57,6 @@ def test_backend_can_omit_primal_value_and_skip_source_forward():
     request = Derivative(y, x)
 
     class Square(Model):
-        geometry = None
         signature = Signature({x: ()}, {y: ()})
 
         def evaluate(self, values):

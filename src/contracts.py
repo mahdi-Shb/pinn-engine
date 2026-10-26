@@ -5,7 +5,7 @@ Implementation lives in pinn_engine/; no class definitions are duplicated here.
 """
 
 from pinn_engine import (
-    Axis, Geometry, Quantity, Field, Value, Signature, Model,
+    Axis, Quantity, Value, Signature, Model,
     Derivative, TotalDerivative, PartialDerivative,
     DerivativeBackend, AutogradBackend, Solver,
 )
@@ -19,7 +19,6 @@ def _example() -> None:
     x, prediction, loss = map(Quantity, ("x", "prediction", "loss"))
 
     class Predict(Model):
-        geometry = None
         signature = Signature({x: ()}, {prediction: ()})
 
         def __init__(self):
@@ -30,7 +29,6 @@ def _example() -> None:
             return {prediction: self.network(values[x].unsqueeze(-1)).squeeze(-1)}
 
     class Loss(Model):
-        geometry = None
         signature = Signature({prediction: ("scenario", "point")}, {loss: ()})
 
         def evaluate(self, values):

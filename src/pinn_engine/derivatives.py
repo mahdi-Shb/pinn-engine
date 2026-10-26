@@ -7,7 +7,6 @@ capability checks and gradient mode live in _autograd.py.
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
-from .geometry import Geometry
 from .quantities import Quantity
 from .derivative_backends import resolve_backend
 
@@ -56,10 +55,6 @@ class Derivative(Quantity):
     @property
     def kind(self) -> str:
         return "total" if self.holding is None else "partial"
-
-    @property
-    def _domain(self) -> Geometry | None:
-        return self.of._domain
 
     @property
     def _identity(self) -> tuple:

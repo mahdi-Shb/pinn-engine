@@ -25,13 +25,13 @@ def _axes(names: str | Sequence[str]) -> tuple[str, ...]:
 
 @dataclass(frozen=True, eq=False)
 class Value:
-    """A Tensor, or a geometry list of Tensors, with named sample axes.
+    """A Tensor, or a list of Tensors, with named sample axes.
 
-    A list represents the first named axis. Each member represents one geometry
+    A list represents the first named axis. Each member represents one case
     and has all remaining sample axes followed by intrinsic Quantity dimensions.
-    For example, axes=("geometry", "point") can hold [(20, 3), (40, 3)]
+    For example, axes=("case", "point") can hold [(20, 3), (40, 3)]
     for a Quantity with shape=(3,). Lists must be nonempty and non-nested.
-    The outer axis name is user-defined; it need not literally be "geometry".
+    The outer axis name is user-defined; it need not literally be "case".
     Equal-sized outputs remain lists too; stacking is an explicit model choice.
 
     Example: Value(temperatures, axes=("scenario", "point")) for scalar data
@@ -63,10 +63,10 @@ class Value:
 
 
 def _record_size(sizes, axis, size) -> None:
-    """Retain per-geometry lengths instead of forcing ragged axes to be equal.
+    """Retain per-case lengths instead of forcing ragged axes to be equal.
 
-    An integer is a shared dense length; a tuple contains one length per geometry.
-    Shared dense axes must agree with every corresponding per-geometry length.
+    An integer is a shared dense length; a tuple contains one length per case.
+    Shared dense axes must agree with every corresponding per-case length.
     """
     if axis in sizes:
         previous = sizes[axis]
@@ -86,7 +86,7 @@ def _record_size(sizes, axis, size) -> None:
 
 
 def _check_value(quantity: Quantity, value: Value, sizes: dict) -> None:
-    """Check intrinsic shapes and sample lengths, including ragged geometry axes."""
+    """Check intrinsic shapes and sample lengths, including ragged sample axes."""
     if not isinstance(value, Value):
         raise TypeError(f"Value for {quantity.name!r} must be a Value object")
     is_list = isinstance(value.tensor, list)

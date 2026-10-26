@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from contracts import (
-    Derivative, Field, Model, PartialDerivative, Quantity, Signature, Solver,
+    Derivative, Model, PartialDerivative, Quantity, Signature, Solver,
     TotalDerivative, Value,
 )
 
@@ -27,12 +27,10 @@ def test_derivative_identity_is_symbolic_and_holding_is_unordered():
     assert Derivative(total, b).shape == (3, 2, 2)
 
 
-def test_derivative_retains_domain_and_detects_operand_shape_conflicts():
-    domain = object()
-    temperature = Field("T", geometry=domain)
+def test_derivative_detects_operand_shape_conflicts():
+    temperature = Quantity("T")
     x = Quantity("x", (2,))
     gradient = Derivative(temperature, x)
-    assert gradient._domain is domain
     assert gradient.shape == (2,)
     with pytest.raises(ValueError, match="Conflicting shapes"):
         Signature({Quantity("x", (3,)): (), gradient: ()}, {Quantity("r"): ()})
@@ -43,7 +41,6 @@ def test_coupled_model_preserves_outer_scenarios_and_training_gradients(output_a
     x, centered = Quantity("x"), Quantity("centered")
 
     class Center(Model):
-        geometry = None
         signature = Signature({x: "point"}, {centered: output_axis})
 
         def evaluate(self, values):
@@ -63,7 +60,6 @@ def test_reusing_a_core_axis_still_requires_its_original_size():
     x, y = Quantity("x"), Quantity("y")
 
     class DropLast(Model):
-        geometry = None
         signature = Signature({x: "point"}, {y: "point"})
 
         def evaluate(self, values):
@@ -79,14 +75,12 @@ def test_reduction_is_legal_but_rebroadcasting_it_does_not_restore_independence(
     reduced = TotalDerivative(mean, x)
 
     class Mean(Model):
-        geometry = None
         signature = Signature({x: "point"}, {mean: ()})
 
         def evaluate(self, values):
             return {mean: values[x].mean()}
 
     class Predict(Model):
-        geometry = None
         signature = Signature({x: (), mean: ()}, {temperature: ()})
 
         def evaluate(self, values):
@@ -105,7 +99,6 @@ def test_point_coupling_does_not_block_ad_of_an_independent_scenario_parameter()
     scenario = TotalDerivative(temperature, parameter)
 
     class MixPoints(Model):
-        geometry = None
         signature = Signature({x: "point", parameter: ()}, {temperature: "point"})
 
         def evaluate(self, values):
@@ -127,7 +120,6 @@ def test_models_cannot_provide_symbolic_derivatives_and_cycles_are_rejected():
     request = Derivative(temperature, x)
 
     class Inject(Model):
-        geometry = None
         signature = Signature({x: ()}, {request: ()})
 
         def evaluate(self, values):
@@ -137,7 +129,6 @@ def test_models_cannot_provide_symbolic_derivatives_and_cycles_are_rejected():
         Solver([Inject()])
 
     class Cyclic(Model):
-        geometry = None
         signature = Signature({request: ()}, {temperature: ()})
 
         def evaluate(self, values):

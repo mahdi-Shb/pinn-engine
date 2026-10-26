@@ -49,10 +49,6 @@ class Solver(nn.Module):
         return self._graph.outputs
 
     @property
-    def geometry(self):
-        return self._graph.geometry
-
-    @property
     def derivatives(self):
         return self._derivative_engine.requests
 

@@ -1,7 +1,9 @@
 # PINN Engine
 
 An experimental engine for composing PyTorch models using quantities and named
-sample axes. This repository runs independently of the original PINNlab package.
+sample axes. Quantities are identified by name; Model and Solver do not
+carry geometry/domain attributes. This repository runs independently of the
+original PINNlab package.
 
 ## Setup
 
@@ -27,8 +29,7 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
 ## Files
 
 - [src/pinn_engine/](src/pinn_engine/): implementation modules:
-  - `geometry.py`: the abstract geometry interface.
-  - `quantities.py`: `Quantity` and `Field` declarations.
+  - `quantities.py`: `Quantity` declarations.
   - `values.py`: `Value`, named axes, and runtime shape checks.
   - `model.py`: `Signature`, abstract `Model`, and automatic `vmap`.
   - `solver.py`: the nn.Module host, runtime value checks, and public API.
@@ -47,7 +48,7 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
   coordinate, and the model learns from the analytical solution.
 - [tests/test_contracts.py](tests/test_contracts.py): executable contract tests.
 - [Current contract documentation, in Persian](docs/contracts.fa.md).
-- [Geometry lists and automatic batching, in Persian](docs/geometry_lists.fa.md).
+- [Tensor lists and automatic batching, in Persian](docs/tensor_lists.fa.md).
 - [Design and research notes](docs/README.md).
 
 ## Current implementation boundary
@@ -55,8 +56,8 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
 Ordinary model evaluation, named-axis `vmap`, parameter training, dependency
 planning, and graph visualization are implemented. A model can consume a full
 point axis and return values on that same axis. `Value` also accepts a flat list
-of Tensors for a named outer geometry axis with variable-size members. Models
-either consume that list in full or run per geometry; common dense axes can
+of Tensors for a named outer sample axis with variable-size members. Models
+either consume that list in full or run per member; common dense axes can
 still use `vmap`. This representation adds no padding or parallel job scheduling.
 
 Select the numerical method in the host constructor:
@@ -119,14 +120,15 @@ by direct AD. `holding=()` is accepted and numerically behaves like a total
 request. Spatial partials with independent x/y inputs remain ordinary valid AD.
 
 The former local reverse implementation, holding support, and cross-request
-VJP grouping are preserved on branch `partial-derivatives` at `12d97a1`.
+VJP grouping are preserved on branch `partial-derivative-and-geometry-domain-support` at `12d97a1`.
 Main continues from that commit using the simpler direct-AD implementation.
 
 The notebook trains on analytical data, then evaluates and backpropagates through
 a physics residual. It does not claim convergence from physics training.
 See [the derivative contract](docs/contracts.fa.md) for details and limitations.
 
-Geometry compatibility beyond object identity, sampler implementations, non-AD
-built-in methods, persistent cache policy, and CUDA stream scheduling remain
+Geometry/domain interfaces are deferred; the GeoCore and field-domain ideas are
+recorded in [the design notes](docs/architecture_open_decisions.fa.md).
+Sampler implementations, non-AD built-in methods, persistent cache policy, and CUDA stream scheduling remain
 open work. Ordinary Solver fullgraph capture is tested; derivative fullgraph
 capture, Inductor speedups, and GPU concurrency are not claimed.
