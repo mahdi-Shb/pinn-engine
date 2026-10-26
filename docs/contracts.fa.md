@@ -1,7 +1,7 @@
 # قرارداد مشتق مستقیم و مرتبه‌های بالاتر
 
 موتور در `src/pinn_engine` است؛ importهای `contracts` و `pinn_engine` همان کلاس‌ها را صادر می‌کنند.
-نسخهٔ قبلیِ AD محلی با holding و اشتراک VJP در branch `codex/grouped-local-ad` و commit
+نسخهٔ قبلیِ AD محلی با holding و اشتراک VJP در branch `partial-derivatives` و commit
 `12d97a1` حفظ شده است. در main دیگر DerivativePlan، برنامهٔ مسیر یا backward مدل‌به‌مدل نداریم.
 
 ## تعریف درخواست و وابستگی‌ها

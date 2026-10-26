@@ -119,7 +119,7 @@ by direct AD. `holding=()` is accepted and numerically behaves like a total
 request. Spatial partials with independent x/y inputs remain ordinary valid AD.
 
 The former local reverse implementation, holding support, and cross-request
-VJP grouping are preserved on branch `codex/grouped-local-ad` at `12d97a1`.
+VJP grouping are preserved on branch `partial-derivatives` at `12d97a1`.
 Main continues from that commit using the simpler direct-AD implementation.
 
 The notebook trains on analytical data, then evaluates and backpropagates through
