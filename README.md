@@ -87,20 +87,35 @@ solver = Solver(models, outputs=loss, derivative_backend=AutogradBackend())
 ```
 
 Each backend implements `name` and `compute(request, values, *, chunk_size)`.
-The engine executes required models and derivative nodes in topological order;
-the backend computes one derivative from its declared values. Default
+The engine executes ready models and derivative groups in dependency order;
+the backend computes derivatives from their declared values. Default
 `dependencies(graph, request)` requires only `of` and `wrt`. A mesh-based method
 can additionally request mesh/connectivity quantities, including model outputs.
 An analytical method can omit an unnecessary primal value. Optional hooks cover
-execution context, target preparation, and method-specific validation.
+execution context, target preparation, method-specific validation, and grouping.
 There are no DerivativePlan objects, path plans, or per-model reverse scheduling.
 
 AD needs the connected tensors, not just numerical copies of the two values.
 It uses `torch.autograd.grad` on the existing forward graph, with
 `create_graph=True` and graph retention for further derivatives and training.
-Models run once per selected forward call. Separate requests run sequentially;
-shared backward portions may be computed again. Tensor-output directions within
-one request can be batched and bounded by `derivative_chunk_size`.
+Models run once per selected forward call. Requests with the same source and
+compatible output directions share a reverse sweep over all target tensors.
+Different sources or incompatible point/scenario contractions stay separate;
+there is no global stacking with zero lanes for unrelated outputs. Tensor-output
+directions are batched and bounded by `derivative_chunk_size`.
+
+Grouping belongs to each backend. Optional `group_key(request, values)` selects
+compatible ready requests; None keeps a singleton. `compute_group(requests,
+inputs, *, chunk_size, prepared=None)` receives a separate dependency mapping
+for each request and returns exactly their Value results. `prepare_group` can
+build common numeric data once per key per Solver call, such as a mesh operator,
+and reuse it in later dependency frontiers. No persistent cache is introduced.
+The default backend hooks keep existing single-request implementations working.
+
+See [grouping rules and backend examples, in Persian](docs/derivative_grouping.fa.md).
+Forward-mode, Taylor-mode, and FEM are not new built-in methods: small executable
+test backends verify shared-input JVPs, fused polynomial orders, and reuse of
+triangle geometry operators with this interface.
 
 ```python
 Tx = Derivative(T, x)

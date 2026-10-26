@@ -168,21 +168,51 @@ class DerivativeEngine:
                     separate = external or any(id(t) in aliases for t in leaves)
                     values[quantity] = self.backend.prepare_target(value, separate=separate)
 
-        # One topological traversal: each model and each unique derivative runs
-        # once. Higher orders simply wait for their inner derivative nodes.
+        # Finish ready models before collecting a derivative frontier. This
+        # exposes compatible requests even when their producers are far apart
+        # in the declared graph, without replay or executing unselected nodes.
         with self.backend.execution_context():
             prepare_targets(tuple(values), external=True)
-            for node in graph.ordered:
-                if node not in needed:
-                    continue
-                kind, key = node
-                if kind == "model":
-                    run_model(key)
-                else:
-                    self.validate(graph, key, values)
-                    inputs = {q: values[q] for q in self.dependencies(key)}
-                    store({key: self.backend.compute(key, inputs, chunk_size=self.chunk_size)})
-                prepare_targets(graph.node_outputs[node])
+            pending = set(needed)
+            prepared_groups = {}  # Per-call numeric reuse, never persistent state.
+            while pending:
+                # graph.ordered already places upstream models first, so one
+                # pass completes every currently reachable ordinary model.
+                for node in graph.ordered:
+                    if node in pending and node[0] == "model" and all(
+                        q in values for q in graph.dependencies[node]
+                    ):
+                        run_model(node[1])
+                        prepare_targets(graph.node_outputs[node])
+                        pending.remove(node)
+                ready = [key for kind, key in graph.ordered
+                         if kind == "derivative" and (kind, key) in pending
+                         and all(q in values for q in self.dependencies(key))]
+                if not ready:
+                    if pending:
+                        raise RuntimeError("No ready derivative or model; a declared dependency is missing")
+                    break
+                inputs, groups = {}, {}
+                for request in ready:
+                    self.validate(graph, request, values)
+                    inputs[request] = {q: values[q] for q in self.dependencies(request)}
+                    key = self.backend.group_key(request, inputs[request])
+                    # None means singleton, not one large default group.
+                    key = (False, request) if key is None else (True, key)
+                    groups.setdefault(key, []).append(request)
+                for key, group in groups.items():
+                    group_inputs = {request: inputs[request] for request in group}
+                    if key not in prepared_groups:
+                        prepared_groups[key] = self.backend.prepare_group(tuple(group), group_inputs)
+                    result = self.backend.compute_group(
+                        tuple(group), group_inputs, chunk_size=self.chunk_size,
+                        prepared=prepared_groups[key],
+                    )
+                    if set(result) != set(group):
+                        raise ValueError("Derivative backend returned requests different from its group")
+                    store(result)
+                    prepare_targets(group)
+                    pending.difference_update(("derivative", request) for request in group)
         return True
 
     def validate(self, graph, request, values):

@@ -5,7 +5,11 @@ from contextlib import nullcontext
 
 
 class DerivativeBackend(ABC):
-    """Compute one request from declared values, independently of Solver."""
+    """Compute requests from declared values, independently of Solver.
+
+    Grouping is method-specific: reverse directions, forward tangents, and mesh
+    operators have different reuse criteria. The default keeps requests separate.
+    """
 
     @property
     @abstractmethod
@@ -24,7 +28,7 @@ class DerivativeBackend(ABC):
         return tuple(dict.fromkeys((request.of, request.wrt)))
 
     def execution_context(self):
-        """Cover this call's model and derivative operations; no grad by default."""
+        """Cover model and derivative operations; preserve the current mode by default."""
         return nullcontext()
 
     def prepare_target(self, value, *, separate=False):
@@ -33,6 +37,36 @@ class DerivativeBackend(ABC):
 
     def validate(self, graph, request, values):
         """Optional capability/layout checks, without constructing a plan."""
+
+    def group_key(self, request, values):
+        """Return a hashable reuse key, or None to keep this request separate.
+
+        values contains only this request's declared dependencies. Equal keys
+        mean compute_group can handle these ready requests together. Include
+        every relevant layout, operator, direction, or mesh distinction.
+        """
+        return None
+
+    def prepare_group(self, requests, inputs):
+        """Optionally build reusable numeric data for this key, e.g. a mesh operator.
+
+        The engine retains it only for this Solver call, including later ready
+        frontiers with the same key. Include all preparation dependencies in the
+        key; do not assume every field or derivative order is already available.
+        This is runtime method data, never a model-path derivative plan.
+        """
+        return None
+
+    def compute_group(self, requests, inputs, *, chunk_size, prepared=None):
+        """Return a request-to-Value mapping; default to separate computation.
+
+        inputs maps EACH request to its own dependency-value mapping. A method
+        opting into reuse overrides this together with group_key. prepared is
+        its own optional prepare_group result. Only selected
+        requests and their required ancestors are supplied, never unrelated work.
+        """
+        return {request: self.compute(request, inputs[request], chunk_size=chunk_size)
+                for request in requests}
 
     @abstractmethod
     def compute(self, request, values, *, chunk_size):
