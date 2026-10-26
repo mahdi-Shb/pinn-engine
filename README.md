@@ -33,13 +33,11 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
   - `model.py`: `Signature`, abstract `Model`, and automatic `vmap`.
   - `solver.py`: the nn.Module host, runtime value checks, and public API.
   - `_graph.py`: dependency metadata, producer registration, ordering, and selection.
-  - `derivatives.py`: derivative declarations and DerivativeEngine, which owns
-    virtual nodes, backend-declared requirements, and request coordination.
-  - `derivative_paths.py`: optional model-path analysis used by AutogradBackend.
-  - `derivative_backends.py`: the small DerivativeBackend execution interface
-    and explicit method selection.
-  - `_autograd.py`: AutogradBackend, its AD checks and gradient-mode handling,
-    per-call forward tape, and grouped local VJPs; independent of Solver.
+  - `derivatives.py`: nested derivative declarations, virtual producer nodes,
+    backend-declared requirements, and topological execution coordination.
+  - `derivative_backends.py`: value-based numerical methods and method selection.
+  - `_autograd.py`: direct PyTorch AD, target preparation, named-axis layout
+    checks, and chunked tensor-output directions. No per-model backward or tape.
   - `_visualization.py`: Mermaid/DOT rendering and Graphviz file output.
 - [src/contracts.py](src/contracts.py): compatibility imports and the runnable example.
   Both `from contracts import Model` and `from pinn_engine import Model` resolve
@@ -87,42 +85,48 @@ from pinn_engine import AutogradBackend, DerivativeBackend, Solver
 solver = Solver(models, outputs=loss, derivative_backend=AutogradBackend())
 ```
 
-Each backend implements `name` and `execute`. Optional `dependencies(graph,
-request)` declares required values (default: `of` and `wrt`); a mesh-based method
-can add connectivity, while an analytical method can omit the primal output.
-Optional `prepare(graph, requests)` returns static method-specific metadata;
-the default is an empty mapping and performs no model-path analysis. Runtime
-mesh/grid-dependent work belongs in `execute`, after values become available.
-`execute` receives raw derivative requests and its own `preparation` keyword.
-`validate` can reject unsupported requests, including unsupported holding rules.
+Each backend implements `name` and `compute(request, values, *, chunk_size)`.
+The engine executes required models and derivative nodes in topological order;
+the backend computes one derivative from its declared values. Default
+`dependencies(graph, request)` requires only `of` and `wrt`. A mesh-based method
+can additionally request mesh/connectivity quantities, including model outputs.
+An analytical method can omit an unnecessary primal value. Optional hooks cover
+execution context, target preparation, and method-specific validation.
+There are no DerivativePlan objects, path plans, or per-model reverse scheduling.
 
-`solver.derivative_preparation` exposes that metadata. `solver.derivative_plans`
-is an optional path inspection view: AutogradBackend supplies it through
-`path_plans`; value-based backends leave it empty. Graph diagrams show the actual
-declared requirements, including extra mesh/grid inputs. Solver still declares
-external inputs for the entire model graph; skipping a source forward does not
-change that input contract.
+AD needs the connected tensors, not just numerical copies of the two values.
+It uses `torch.autograd.grad` on the existing forward graph, with
+`create_graph=True` and graph retention for further derivatives and training.
+Models run once per selected forward call. Separate requests run sequentially;
+shared backward portions may be computed again. Tensor-output directions within
+one request can be batched and bounded by `derivative_chunk_size`.
 
-DerivativeEngine holds a backend rather than inheriting from it. The base
-contract requires no tape, grid, function replay, or model-path plan.
-Finite-difference, spectral, and FEM backends can be added as direct subclasses
-when they are implemented; these numerical methods are not included yet.
+```python
+Tx = Derivative(T, x)
+Txx = Derivative(Tx, x)
+solver = Solver(models, outputs=(T, Tx, Txx))
+result = solver(values)
+loss = result[Txx].tensor.square().mean()
+loss.backward()
+```
 
-First-order total and partial derivatives are implemented with grouped local
-reverse-mode AD. Model inputs are recorded as distinct identity views during a
-single forward. Each request has independent `wrt` and `holding` stops; equal
-incoming adjoints share local VJPs across requests. Other directions are batched
-and chunked with `Solver(..., derivative_chunk_size=64)`. Derivatives remain
-connected to parameter training, including parameters producing held values.
-Shared independent sample axes are aligned without a full cross-sample Jacobian;
-distinct output/input axis names expose cross-axis Jacobians explicitly. Coupled
-shared sample axes are rejected. Real Tensor lists are supported as well.
+Nested, mixed, and vector-valued derivatives are supported, including constant
+higher derivatives and ragged Tensor lists. Independent shared sample axes are
+aligned without full cross-sample Jacobians. A shared axis consumed in full on
+a dependent path is conservatively rejected; distinct input/output axis names
+request explicit cross-axis Jacobians. Nonempty `holding` is explicitly rejected
+by direct AD. `holding=()` is accepted and numerically behaves like a total
+request. Spatial partials with independent x/y inputs remain ordinary valid AD.
 
-The notebook still trains on analytical data, then evaluates and backpropagates
-through the physics residual. It does not claim convergence from physics training.
-See [the AD contract](docs/contracts.fa.md) for scope and limitations.
+The former local reverse implementation, holding support, and cross-request
+VJP grouping are preserved on branch `codex/grouped-local-ad` at `12d97a1`.
+Main continues from that commit using the simpler direct-AD implementation.
 
-Geometry compatibility beyond object identity, sampler implementations, higher-order
-derivative requests, non-AD backends, and persistent cache policy remain open design work. The historical
-notes describe proposals as well as decisions; the current contract document and
-code describe the implemented behavior.
+The notebook trains on analytical data, then evaluates and backpropagates through
+a physics residual. It does not claim convergence from physics training.
+See [the derivative contract](docs/contracts.fa.md) for details and limitations.
+
+Geometry compatibility beyond object identity, sampler implementations, non-AD
+built-in methods, persistent cache policy, and CUDA stream scheduling remain
+open work. Ordinary Solver fullgraph capture is tested; derivative fullgraph
+capture, Inductor speedups, and GPU concurrency are not claimed.

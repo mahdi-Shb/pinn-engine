@@ -1,7 +1,7 @@
-"""Symbolic first derivatives, backend requirements, and request coordination.
+"""Nested derivative declarations and ordinary graph execution coordination.
 
 Numerical execution is selected through DerivativeBackend. Autograd-specific
-capability checks, tape creation, and gradient mode live in _autograd.py.
+capability checks and gradient mode live in _autograd.py.
 """
 
 from __future__ import annotations
@@ -10,11 +10,10 @@ from typing import Sequence
 from .geometry import Geometry
 from .quantities import Quantity
 from .derivative_backends import resolve_backend
-from .derivative_paths import DerivativePlan  # Compatibility export, not mandatory planning.
 
 @dataclass(frozen=True, eq=False, init=False)
 class Derivative(Quantity):
-    """A first-order, full-Quantity derivative, independent of any AD backend.
+    """A full-Quantity derivative, optionally of another derivative.
 
     Derivative(a, b) is total along the hosting Solver's computation graph.
     Derivative(a, b, holding=(z,)) is partial: hold z's current value fixed
@@ -24,7 +23,8 @@ class Derivative(Quantity):
     Intrinsic shape is a.shape + b.shape, output components first. Runtime
     sample axes are NOT guessed here. Independent mapped samples can align;
     The selected numerical backend validates its own sample-axis capabilities.
-    No component indexing or higher-order derivatives are supported yet.
+    Nest of to request higher orders. Component indexing is not implemented.
+    A backend may reject holding; direct AD supports only an empty holding set.
     """
 
     of: Quantity
@@ -41,8 +41,6 @@ class Derivative(Quantity):
         operands = (of, wrt, *(fixed or ()))
         if any(not isinstance(q, Quantity) for q in operands):
             raise TypeError("holding must contain Quantity objects")
-        if any(isinstance(q, Derivative) for q in operands):
-            raise NotImplementedError("Only first-order derivative declarations are supported")
         if fixed is not None:
             if len(set(fixed)) != len(fixed):
                 raise ValueError("holding cannot repeat quantities")
@@ -84,12 +82,11 @@ def PartialDerivative(
 
 
 def _related_quantities(quantity: Quantity):
-    """Include symbolic operands when checking repeated shape declarations."""
+    """Include nested symbolic operands when checking repeated shapes."""
     yield quantity
     if isinstance(quantity, Derivative):
-        yield quantity.of
-        yield quantity.wrt
-        yield from quantity.holding or ()
+        for operand in (quantity.of, quantity.wrt, *(quantity.holding or ())):
+            yield from _related_quantities(operand)
 
 
 class DerivativeEngine:
@@ -104,13 +101,7 @@ class DerivativeEngine:
         self.backend = resolve_backend(backend)
         self.chunk_size = chunk_size
         self.requests = ()
-        self.preparation = {}
         self.requirements = {}
-
-    @property
-    def plans(self):
-        """Compatibility inspection of paths, without interpreting backend data."""
-        return self.backend.path_plans(self.preparation)
 
     @property
     def chunk_size(self):
@@ -147,15 +138,11 @@ class DerivativeEngine:
     def _collect(graph, quantity, requests):
         for related in _related_quantities(quantity):
             graph.register_quantity(related)
-        if isinstance(quantity, Derivative):
-            requests[quantity] = None
+            if isinstance(related, Derivative):
+                requests[related] = None
 
     def dependencies(self, derivative):
         return self.requirements[derivative]
-
-    def prepare(self, graph):
-        """Keep backend-owned preparation; the default does no model-path work."""
-        self.preparation = self.backend.prepare(graph, self.requests)
 
     def execute(self, graph, needed, values, run_model, store):
         """Handle a derivative call; return False for ordinary host execution."""
@@ -164,12 +151,47 @@ class DerivativeEngine:
         if not requests:
             return False
 
-        self.backend.execute(graph, requests, needed, values, run_model, store,
-                             self.chunk_size, preparation=self.preparation)
+        targets = {request.wrt for request in requests}
+        # An intermediate target may be used inside its producer before being
+        # returned. Enable its floating external ancestors before that forward.
+        ancestors = graph.needed_nodes(tuple(targets))
+        roots = targets | {q for node in ancestors for q in graph.dependencies[node]}
+
+        def prepare_targets(quantities, *, external=False):
+            for quantity in quantities:
+                if quantity in (roots if external else targets):
+                    value = values[quantity]
+                    leaves = value.tensor if isinstance(value.tensor, list) else (value.tensor,)
+                    if external and quantity not in targets and not all(
+                        t.is_floating_point() or t.is_complex() for t in leaves
+                    ):
+                        continue
+                    # Separate aliases, but preserve a genuine intermediate
+                    # tensor already used by sibling outputs of the same model.
+                    aliases = {id(t) for q, v in values.items() if q != quantity
+                               for t in (v.tensor if isinstance(v.tensor, list) else (v.tensor,))}
+                    separate = external or any(id(t) in aliases for t in leaves)
+                    values[quantity] = self.backend.prepare_target(value, separate=separate)
+
+        # One topological traversal: each model and each unique derivative runs
+        # once. Higher orders simply wait for their inner derivative nodes.
+        with self.backend.execution_context():
+            prepare_targets(tuple(values), external=True)
+            for node in graph.ordered:
+                if node not in needed:
+                    continue
+                kind, key = node
+                if kind == "model":
+                    run_model(key)
+                else:
+                    self.validate(graph, key, values)
+                    inputs = {q: values[q] for q in self.dependencies(key)}
+                    store({key: self.backend.compute(key, inputs, chunk_size=self.chunk_size)})
+                prepare_targets(graph.node_outputs[node])
         return True
 
     def validate(self, graph, request, values):
-        self.backend.validate(graph, request, values, preparation=self.preparation)
+        self.backend.validate(graph, request, values)
 
     def node_id(self, node):
         return f"d{self.requests.index(node[1])}"
@@ -188,4 +210,4 @@ class DerivativeEngine:
                 yield quantity, "input"
 
     def graph_detail(self, derivative):
-        return self.backend.describe_request(derivative, preparation=self.preparation)
+        return self.backend.description

@@ -16,7 +16,7 @@ class Solver(nn.Module):
     """Register models and execute selected outputs from their declared graph.
 
     ComputationGraph owns dependency metadata. DerivativeEngine owns virtual
-    producers and derivative paths; the selected backend owns numerical execution.
+    derivative producers; the selected backend owns numerical execution.
     Solver only checks
     runtime values, invokes modules through their normal hooks, and stores results.
     """
@@ -35,7 +35,6 @@ class Solver(nn.Module):
         )
         self._derivative_engine.install(self._graph, requested)
         self._graph.finalize(requested)
-        self._derivative_engine.prepare(self._graph)
         # Keep existing state_dict names and ordinary nn.Module behavior.
         self.models = self._graph.models
         for index, model in enumerate(self.models):
@@ -58,14 +57,6 @@ class Solver(nn.Module):
         return self._derivative_engine.requests
 
     @property
-    def derivative_plans(self):
-        return self._derivative_engine.plans
-
-    @property
-    def derivative_preparation(self):
-        return self._derivative_engine.preparation
-
-    @property
     def derivative_backend(self):
         return self._derivative_engine.backend
 
@@ -76,10 +67,6 @@ class Solver(nn.Module):
     @derivative_chunk_size.setter
     def derivative_chunk_size(self, size):
         self._derivative_engine.chunk_size = size
-
-    def validate_autograd(self, plan, values):
-        """Compatibility alias for the selected backend capability check."""
-        self._derivative_engine.validate(self._graph, plan.derivative, values)
 
     def forward(
         self, values: Mapping[Quantity, Value], *,
@@ -92,10 +79,10 @@ class Solver(nn.Module):
         self._store(values, pool, sizes)
         needed = self._graph.needed_nodes(selected)
 
-        def run_model(index, call=None):
+        def run_model(index):
             model = self.models[index]
             inputs = {q: pool[q] for q in model.inputs}
-            result = model(inputs) if call is None else call(index, model, inputs)
+            result = model(inputs)
             if set(result) != set(model.outputs):
                 raise ValueError("Model returned quantities different from its signature")
             self._store(result, pool, sizes)

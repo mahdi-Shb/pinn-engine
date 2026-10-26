@@ -37,11 +37,10 @@ def make_models():
 
 def test_derivative_engine_runs_without_a_solver_instance():
     models, (x, z, y) = make_models()
-    request = Derivative(y, x, holding=(z,))
+    request = Derivative(y, x)
     graph, engine = ComputationGraph(models), DerivativeEngine()
     engine.install(graph, (request,))
     graph.finalize((request,))
-    engine.prepare(graph)
     values = {x: Value(torch.tensor([1., 2.]), "point")}
     calls = []
 
@@ -52,9 +51,9 @@ def test_derivative_engine_runs_without_a_solver_instance():
         values.update(model(inputs) if call is None else call(index, model, inputs))
 
     engine.execute(graph, graph.needed_nodes((request,)), values, run_model, values.update)
-    torch.testing.assert_close(values[request].tensor, torch.tensor([2., 2.]))
+    torch.testing.assert_close(values[request].tensor, torch.tensor([6., 10.]))
     values[request].tensor.sum().backward()
-    torch.testing.assert_close(models[0].weight.grad, torch.tensor(2.))
+    torch.testing.assert_close(models[0].weight.grad, torch.tensor(8.))
     assert calls == [1, 0]
 
 
@@ -80,7 +79,7 @@ def test_chunk_size_and_existing_graph_metadata_delegate_to_their_owners():
     assert solver._needed_nodes((request,)) == solver._graph.needed_nodes((request,))
     assert solver._ordered is solver._graph.ordered
     assert solver._node_dependencies is solver._graph.dependencies
-    assert solver.derivative_plans is solver._derivative_engine.plans
+    assert solver._node_dependencies[("derivative", request)] == (y, x)
     torch.testing.assert_close(solver({x: Value(torch.tensor(2.))})[request].tensor, torch.tensor(10.))
     with pytest.raises(ValueError, match="positive integer"):
         solver.derivative_chunk_size = 0
@@ -143,11 +142,10 @@ def test_custom_backend_is_not_forced_to_use_autograd_rules_or_a_tape():
 
         name = "analytic-square"
 
-        def execute(self, graph, requests, needed, values, run_model, store, chunk_size, *, preparation=None):
+        def compute(self, request, values, *, chunk_size):
             assert not torch.is_grad_enabled()
-            run_model(graph.model_producers[y])
-            assert preparation == {}
-            store({request: Value(2 * values[x].tensor, values[x].axes) for request in requests})
+            assert set(values) == {x, y}
+            return Value(2 * values[x].tensor, values[x].axes)
 
     points = torch.tensor([1., 2.])
     solver = Solver([Square()], outputs=request, derivative_backend=AnalyticSquare())

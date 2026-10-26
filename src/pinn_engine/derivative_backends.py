@@ -1,19 +1,15 @@
-"""Small execution interface for numerical derivative methods.
-
-A backend declares the values it needs and optionally prepares method-specific
-metadata. Model-path plans, tapes, grids, and meshes are never mandatory here.
-"""
+"""Value-based numerical methods; no model-path plans or forward tapes."""
 
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 
 
 class DerivativeBackend(ABC):
-    """Numerical execution, without requiring an autograd tape or grad mode."""
+    """Compute one request from declared values, independently of Solver."""
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Stable method name, also used in graph descriptions."""
         raise NotImplementedError
 
     @property
@@ -21,47 +17,35 @@ class DerivativeBackend(ABC):
         return self.name
 
     def dependencies(self, graph, request):
-        """Default to sampled output/input values; add mesh/grid data as needed.
+        """Add mesh/connectivity/grid quantities here, including model outputs.
 
-        Callable-based methods may need different values, including held inputs.
-        Requirements are registered as graph edges before ordering the graph.
+        An analytical method may also omit an unnecessary primal output.
         """
         return tuple(dict.fromkeys((request.of, request.wrt)))
 
-    def prepare(self, graph, requests):
-        """Optional static preparation, owned by this method; no paths by default.
+    def execution_context(self):
+        """Cover this call's model and derivative operations; no grad by default."""
+        return nullcontext()
 
-        Return a metadata mapping. Values need not be DerivativePlan objects.
-        This is called after graph ordering, without evaluating models.
-        """
-        return {}
+    def prepare_target(self, value, *, separate=False):
+        """Optionally prepare a wrt value before any consumer uses it."""
+        return value
 
-    def path_plans(self, preparation):
-        """Optional inspection view for path-aware methods; empty otherwise."""
-        return {}
-
-    def validate(self, graph, request, values, *, preparation=None):
-        """Optionally reject requests this backend cannot interpret correctly."""
-
-    def describe_request(self, request, *, preparation):
-        """Supply diagram details without requiring model-path metadata."""
-        return self.description
+    def validate(self, graph, request, values):
+        """Optional capability/layout checks, without constructing a plan."""
 
     @abstractmethod
-    def execute(self, graph, requests, needed, values, run_model, store, chunk_size, *, preparation=None):
-        """Compute requests and their consumers through the host callbacks.
+    def compute(self, request, values, *, chunk_size):
+        """Return one Value, receiving only the declared dependency values.
 
-        requests contains raw Derivative declarations. preparation contains only
-        what this backend's optional prepare returned, possibly an empty mapping.
-        run_model(index, call=None) executes and validates a model; an optional
-        call adapter can record its inputs. store(mapping) validates and stores
-        computed Values. Neither callback exposes the hosting Solver.
+        AD needs connected of/wrt tensors, not just numerical data. A mesh
+        method receives the extra values it declared. The engine handles all
+        model execution, ordering, and storing this result.
         """
         raise NotImplementedError
 
 
 def resolve_backend(backend):
-    """Resolve the implemented method or an explicitly supplied backend object."""
     if isinstance(backend, DerivativeBackend):
         return backend
     if not isinstance(backend, str):

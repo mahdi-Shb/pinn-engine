@@ -6,7 +6,7 @@ Implementation lives in pinn_engine/; no class definitions are duplicated here.
 
 from pinn_engine import (
     Axis, Geometry, Quantity, Field, Value, Signature, Model,
-    Derivative, TotalDerivative, PartialDerivative, DerivativePlan,
+    Derivative, TotalDerivative, PartialDerivative,
     DerivativeBackend, AutogradBackend, Solver,
 )
 from pinn_engine import __all__
