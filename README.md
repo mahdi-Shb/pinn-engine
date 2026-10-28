@@ -28,6 +28,9 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
 
 ## Files
 
+- [third_party/](third_party/): imported geometry and network projects for
+  incremental adaptation; source versions are recorded there. They are not
+  automatically installed or exposed by the engine package.
 - [src/pinn_engine/](src/pinn_engine/): implementation modules:
   - `quantities.py`: `Quantity` declarations.
   - `values.py`: `Value`, named axes, and runtime shape checks.

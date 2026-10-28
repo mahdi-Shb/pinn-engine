@@ -1,0 +1,55 @@
+# Pin/plate fin heat sink - a typical PINN heat-transfer geometry.
+# The fins are a linear array whose count, thickness and height are
+# parameters; every fin face is tagged "fins" (convection BC), the bottom
+# plate "base" (heat input).
+name: heatsink
+units: mm
+
+parameters:
+  base_length:   {value: 60, min: 30, max: 100}
+  base_width:    {value: 40, min: 20, max: 80}
+  base_thickness: {value: 4, min: 2, max: 10}
+  fins:          {value: 8,  min: 3, max: 16, type: int}
+  fin_thickness: {value: 1.6, min: 0.8, max: 4}
+  fin_height:    {value: 25, min: 10, max: 50}
+  fin_taper:     {value: 0.0, min: 0.0, max: 0.6, description: top thickness reduction (fraction)}
+  rounding:      {value: 0.6, min: 0.0, max: 1.5, description: voxel smoothing of fin roots}
+
+derived:
+  pitch: (base_length - fin_thickness) / (fins - 1)
+  x0: -base_length / 2 + fin_thickness / 2
+
+constraints:
+  - pitch > fin_thickness + 0.8           # fins must not touch
+
+shape:
+  union:
+    - box: {center: [0, 0, base_thickness / 2], size: [base_length, base_width, base_thickness]}
+      tag: base
+    - linear_array:
+        count: fins
+        step: [pitch, 0, 0]
+        shape:
+          # a tapered fin = intersection of a box with two tilted planes
+          intersection:
+            - box: {center: [0, 0, "base_thickness + fin_height / 2 - 0.01"],
+                    size: [fin_thickness, base_width, "fin_height + 0.02"]}
+            - plane: {point: [fin_thickness / 2, 0, base_thickness],
+                      normal: [1, 0, "fin_taper * fin_thickness / 2 / fin_height"]}
+            - plane: {point: [-fin_thickness / 2, 0, base_thickness],
+                      normal: [-1, 0, "fin_taper * fin_thickness / 2 / fin_height"]}
+      translate: [x0, 0, 0]
+      tag: fins
+
+voxels:
+  voxel_size: 0.25
+  operations:
+    - fillet: rounding
+
+outputs:
+  voxel_grid: {shape: [48, 64, 96], channels: [occupancy, sdf, tags]}
+  point_cloud: {n_points: 4096, mode: mixed, features: [nx, ny, nz, sdf, is_boundary, tags]}
+  mesh_graph: {kind: surface}
+  collocation: {n_interior: 50000, n_boundary: 30000, band: [10000, 0.5]}
+  photo: {views: 4, width: 700, height: 560}
+  summary: true

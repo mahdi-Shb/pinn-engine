@@ -1,0 +1,38 @@
+{
+  "design": "heatsink",
+  "parameters": {
+    "base_length": 60,
+    "base_width": 40,
+    "base_thickness": 4,
+    "fins": 8,
+    "fin_thickness": 1.6,
+    "fin_height": 25,
+    "fin_taper": 0.0,
+    "rounding": 0.6
+  },
+  "derived": {
+    "pitch": 8.342857142857143,
+    "x0": -29.2
+  },
+  "properties": {
+    "volume_mm3": 22441.86250286691,
+    "surface_area_mm2": 21798.331884706633,
+    "bounds_mm": [
+      [
+        -30.00416374206543,
+        -20.00606918334961,
+        -0.002494281157851219
+      ],
+      [
+        30.00416374206543,
+        20.00606918334961,
+        29.002851486206055
+      ]
+    ],
+    "watertight": true,
+    "tags": [
+      "base",
+      "fins"
+    ]
+  }
+}

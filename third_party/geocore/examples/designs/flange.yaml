@@ -1,0 +1,53 @@
+# Pipe flange: hub + disc, central bore, bolt circle made with a polar array.
+# Pure implicit design (no voxels section) - the geometry stays exact.
+name: flange
+units: mm
+
+parameters:
+  outer_radius: {value: 50, min: 30, max: 90}
+  disc_thickness: {value: 10, min: 5, max: 20}
+  hub_radius:   {value: 28, min: 15, max: 50}
+  hub_height:   {value: 30, min: 12, max: 60}
+  bore_radius:  {value: 18, min: 8, max: 40}
+  bolts:        {value: 6, min: 3, max: 12, type: int}
+  bolt_radius:  {value: 4.5, min: 2, max: 8}
+  edge_round:   {value: 2.0, min: 0.0, max: 4.0, description: smooth blend hub/disc}
+
+derived:
+  bolt_circle: (outer_radius + hub_radius) / 2
+
+constraints:
+  - bore_radius < hub_radius - 4
+  - hub_radius < outer_radius - 2 * bolt_radius - 4
+  - 2 * pi * bolt_circle / bolts > 2 * bolt_radius + 3     # bolts must not overlap
+
+shape:
+  difference:
+    - smooth_union:
+        k: max(edge_round, 0.001)
+        shapes:
+          - cylinder: {a: [0, 0, 0], b: [0, 0, disc_thickness], radius: outer_radius}
+            tag: disc
+          - cylinder: {a: [0, 0, 0], b: [0, 0, hub_height], radius: hub_radius}
+            tag: hub
+    - cylinder: {a: [0, 0, -1], b: [0, 0, "hub_height + 1"], radius: bore_radius}
+      tag: bore
+    - polar_array:
+        count: bolts
+        axis: z
+        shape:
+          cylinder: {a: [bolt_circle, 0, -1], b: [bolt_circle, 0, "disc_thickness + 1"], radius: bolt_radius}
+      tag: bolt_holes
+
+outputs:
+  mesh_graph: {}
+  point_cloud: {n_points: 2048}
+  voxel_grid: {shape: 64, channels: [occupancy, sdf, boundary, tags]}
+  parametric_surface:          # Deep NURBS: annular cross-section of the disc
+    domain: {annulus: {r_inner: bore_radius, r_outer: outer_radius, theta0: 0, theta1: 90}}
+    degree: [3, 3]
+    n_ctrl: [12, 8]
+    output_dim: 1
+    dirichlet: {bottom: 0.0, top: 1.0}
+  photo: {views: 4, width: 700, height: 560}
+  summary: true

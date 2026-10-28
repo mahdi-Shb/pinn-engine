@@ -1,0 +1,41 @@
+# Sandwich panel with a graded beam lattice core (PicoGK BeamLattice demo).
+# The cell type is a choice parameter; the strut radius is an expression of
+# the height z, so the lattice is graded.
+name: lattice_panel
+units: mm
+
+parameters:
+  cells:        {value: 4, min: 2, max: 6, type: int, description: cells per direction}
+  cell_size:    {value: 10, min: 5, max: 15}
+  cell:         {value: bcc, choices: [bcc, bccz, fcc, octet, cubic, diamond]}
+  r_bottom:     {value: 1.4, min: 0.6, max: 2.0}
+  r_top:        {value: 0.6, min: 0.4, max: 2.0}
+  skin:         {value: 1.5, min: 0.8, max: 3.0, description: face sheet thickness}
+
+derived:
+  size: cells * cell_size
+
+shape:
+  union:
+    - lattice:
+        cell: $cell
+        min: [0, 0, 0]
+        max: [size, size, size]
+        cell_size: cell_size
+        radius: r_bottom + (r_top - r_bottom) * z / size      # graded with height
+      tag: core
+    - box: {min: [0, 0, "-skin / 2"], max: [size, size, "skin / 2"]}
+      tag: bottom_skin
+    - box: {min: [0, 0, "size - skin / 2"], max: [size, size, "size + skin / 2"]}
+      tag: top_skin
+
+voxels:
+  voxel_size: 0.3
+  operations:
+    - trim: {min: [0, 0, "-skin / 2"], max: [size, size, "size + skin / 2"]}
+
+outputs:
+  voxel_grid: {shape: 64, channels: [occupancy, sdf, boundary, tags]}
+  point_cloud: {n_points: 8192, mode: surface}
+  photo: {views: 4, width: 700, height: 560}
+  summary: true

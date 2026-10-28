@@ -1,0 +1,14 @@
+{
+  "imported_on": "2026-10-28",
+  "neural3dbench": {
+    "url": "https://github.com/n94kholdi/neural3dbench",
+    "commit": "f56080e5a2f931b66b2bc57226cd7c2e657a8d0b",
+    "selection": "All Git-tracked files; Git history excluded"
+  },
+  "geocore": {
+    "archive": "geometry - py.rar",
+    "archive_sha256": "17fb728514ec48416510b97ce375bb318128d859800248f31703fff38bcaa5ae",
+    "source_directory": "geometry - py/geocore",
+    "selection": "All files except Python/Numba caches and build/environment folders"
+  }
+}

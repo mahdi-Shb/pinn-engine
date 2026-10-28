@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geocore"
+version = "0.1.0"
+description = "PicoGK-based geometry core: CAD-like geometry -> MeshGraphNet / PointNet / FNO3D / Deep NURBS inputs and PINN collocation sets"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0 (PicoGK runtime: see geocore/_bin/LICENSE)" }
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "numba>=0.58",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "matplotlib>=3.6"]
+mesh = ["trimesh>=4"]
+render = ["matplotlib>=3.6"]
+
+[tool.setuptools]
+packages = ["geocore"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+geocore = ["_bin/LICENSE", "_bin/win-x64/*.dll", "_bin/osx-arm64/*.dylib", "_bin/linux-x64/*.so*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

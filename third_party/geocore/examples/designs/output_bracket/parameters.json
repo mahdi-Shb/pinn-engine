@@ -1,0 +1,48 @@
+{
+  "design": "bracket",
+  "parameters": {
+    "length": 60,
+    "width": 40,
+    "thickness": 8,
+    "wall_height": 44,
+    "wall_thickness": 8,
+    "boss_radius": 9,
+    "boss_height": 16,
+    "boss_position": 0.654,
+    "hole_radius": 4.5,
+    "bore_radius": 7,
+    "mount_holes": 0,
+    "fillet": 4
+  },
+  "derived": {
+    "wall_x": -26.0,
+    "free_start": -22.0,
+    "boss_x": 12.008000000000003,
+    "bore_z": 26.0
+  },
+  "properties": {
+    "volume_mm3": 30852.41835688525,
+    "surface_area_mm2": 10336.050995457683,
+    "bounds_mm": [
+      [
+        -30.0044002532959,
+        -20.00727081298828,
+        -0.004626091569662094
+      ],
+      [
+        30.00375747680664,
+        20.00727081298828,
+        44.00375747680664
+      ]
+    ],
+    "watertight": true,
+    "tags": [
+      "base",
+      "upright",
+      "boss",
+      "bolt_hole",
+      "shaft_bore",
+      "mount_holes"
+    ]
+  }
+}

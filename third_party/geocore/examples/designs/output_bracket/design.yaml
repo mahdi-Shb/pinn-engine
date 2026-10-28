@@ -1,0 +1,189 @@
+name: bracket
+units: mm
+parameters:
+  length:
+    value: 60
+    min: 40
+    max: 100
+    description: base plate length (x)
+    type: int
+  width:
+    value: 40
+    min: 25
+    max: 70
+    description: base plate width (y)
+    type: int
+  thickness:
+    value: 8
+    min: 4
+    max: 14
+    description: base plate thickness
+    type: int
+  wall_height:
+    value: 44
+    min: 25
+    max: 70
+    description: top of the upright above z=0
+    type: int
+  wall_thickness:
+    value: 8
+    min: 4
+    max: 14
+    type: int
+  boss_radius:
+    value: 9
+    min: 5
+    max: 14
+    type: int
+  boss_height:
+    value: 16
+    min: 10
+    max: 30
+    type: int
+  boss_position:
+    value: 0.654
+    min: 0.3
+    max: 0.8
+    description: boss centre as a fraction of the free plate length
+  hole_radius:
+    value: 4.5
+    min: 1.5
+    max: 10
+  bore_radius:
+    value: 7
+    min: 3
+    max: 12
+    description: shaft bore through the upright
+    type: int
+  mount_holes:
+    value: 0
+    min: 0
+    max: 4
+    description: holes along the front edge
+    type: int
+  fillet:
+    value: 4
+    min: 0
+    max: 6
+    description: concave edge rounding
+    type: int
+derived:
+  wall_x: -length / 2 + wall_thickness / 2
+  free_start: wall_x + wall_thickness / 2
+  boss_x: free_start + boss_position * (length / 2 - free_start)
+  bore_z: thickness + (wall_height - thickness) / 2
+constraints:
+- hole_radius < boss_radius - 1.5
+- bore_radius < (wall_height - thickness) / 2 - 1
+- bore_radius < width / 2 - 2
+- boss_x + boss_radius < length / 2
+shapes:
+  mount_hole:
+    cylinder:
+      a:
+      - 0
+      - 0
+      - -1
+      b:
+      - 0
+      - 0
+      - thickness + 1
+      radius: 2.5
+shape:
+  difference:
+  - union:
+    - box:
+        center:
+        - 0
+        - 0
+        - thickness / 2
+        size:
+        - length
+        - width
+        - thickness
+      tag: base
+    - box:
+        center:
+        - wall_x
+        - 0
+        - wall_height / 2
+        size:
+        - wall_thickness
+        - width
+        - wall_height
+      tag: upright
+    - cylinder:
+        a:
+        - boss_x
+        - 0
+        - 0
+        b:
+        - boss_x
+        - 0
+        - boss_height
+        radius: boss_radius
+      tag: boss
+  - cylinder:
+      a:
+      - boss_x
+      - 0
+      - -1
+      b:
+      - boss_x
+      - 0
+      - boss_height + 1
+      radius: hole_radius
+    tag: bolt_hole
+  - cylinder:
+      a:
+      - wall_x - wall_thickness
+      - 0
+      - bore_z
+      b:
+      - wall_x + wall_thickness
+      - 0
+      - bore_z
+      radius: bore_radius
+    tag: shaft_bore
+  - linear_array:
+      count: max(mount_holes, 1)
+      step:
+      - (length - wall_thickness - 12) / max(mount_holes - 1, 1)
+      - 0
+      - 0
+      shape:
+        ref: mount_hole
+    translate:
+    - wall_x + wall_thickness / 2 + 6
+    - -width / 2 + 5
+    - 0
+    enabled: mount_holes > 0
+    tag: mount_holes
+voxels:
+  voxel_size: 0.4
+  operations:
+  - fillet: fillet
+outputs:
+  mesh_graph: {}
+  point_cloud:
+    n_points: 4096
+    mode: mixed
+  voxel_grid:
+    shape:
+    - 48
+    - 64
+    - 96
+    channels:
+    - occupancy
+    - sdf
+    - boundary
+    - tags
+  collocation:
+    n_interior: 50000
+    n_boundary: 20000
+  photo:
+    views: 4
+    width: 700
+    height: 560
+  stl: true
+  summary: true

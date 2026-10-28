@@ -1,0 +1,39 @@
+{
+  "design": "flange",
+  "parameters": {
+    "outer_radius": 50,
+    "disc_thickness": 10,
+    "hub_radius": 28,
+    "hub_height": 30,
+    "bore_radius": 18,
+    "bolts": 6,
+    "bolt_radius": 4.5,
+    "edge_round": 2.0
+  },
+  "derived": {
+    "bolt_circle": 39.0
+  },
+  "properties": {
+    "volume_mm3": 94234.06407380682,
+    "surface_area_mm2": 24303.377822715665,
+    "bounds_mm": [
+      [
+        -49.999023389812294,
+        -49.999023389812294,
+        -0.5000000000000003
+      ],
+      [
+        49.999023389812294,
+        49.999023389812294,
+        30.0
+      ]
+    ],
+    "watertight": true,
+    "tags": [
+      "disc",
+      "hub",
+      "bore",
+      "bolt_holes"
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "design": "lattice_panel",
+  "parameters": {
+    "cells": 4,
+    "cell_size": 10,
+    "cell": "bcc",
+    "r_bottom": 1.4,
+    "r_top": 0.6,
+    "skin": 1.5
+  },
+  "derived": {
+    "size": 40
+  },
+  "properties": {
+    "volume_mm3": 16016.814733390065,
+    "surface_area_mm2": 25530.535479298902,
+    "bounds_mm": [
+      [
+        -1.0430813546236095e-07,
+        -1.0430813546236095e-07,
+        -0.7500001192092896
+      ],
+      [
+        40.0,
+        40.0,
+        40.75
+      ]
+    ],
+    "watertight": true,
+    "tags": [
+      "core",
+      "bottom_skin",
+      "top_skin"
+    ]
+  }
+}
