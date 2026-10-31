@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 import torch
 from torch import nn
-from pinn_engine.normalization import point_normalization
+from pinn_engine.networks.normalization import point_normalization
 
 
 def feature_transform_regularizer(transform: torch.Tensor) -> torch.Tensor:

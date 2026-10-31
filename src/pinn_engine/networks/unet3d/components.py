@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import torch
 from torch import nn
-from pinn_engine.normalization import BatchNorm3d
+from pinn_engine.networks.normalization import BatchNorm3d
 from torch.nn import functional as F
 
 

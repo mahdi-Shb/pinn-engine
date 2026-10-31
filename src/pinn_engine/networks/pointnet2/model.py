@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from pinn_engine.quantities import Quantity
-from pinn_engine.normalization import normalization_mask, masked_point_inputs
+from pinn_engine.networks.normalization import normalization_mask, masked_point_inputs
 
 import torch
 

@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch import nn
 
-from pinn_engine import normalization as norm
+from pinn_engine.networks import normalization as norm
 
 
 @pytest.fixture(autouse=True)

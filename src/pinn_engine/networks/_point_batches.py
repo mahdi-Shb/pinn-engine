@@ -10,7 +10,7 @@ from math import prod
 import torch
 from torch.nn import functional as F
 
-from ..normalization import normalization_mask, require_mask_aware_batch_norm
+from .normalization import normalization_mask, require_mask_aware_batch_norm
 from ..values import Value
 from ._contract import _model_input, _outputs, _specs
 

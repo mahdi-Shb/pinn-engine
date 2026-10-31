@@ -14,7 +14,7 @@ import torch
 from ..model import Signature
 from ..quantities import Quantity
 from ..values import Value, _check_value
-from ..normalization import batch_norms, uses_batch_statistics
+from .normalization import batch_norms, uses_batch_statistics
 
 
 _GRAPHS = {"gcn", "gat", "meshgraphnet"}

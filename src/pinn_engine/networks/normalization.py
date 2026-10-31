@@ -59,7 +59,7 @@ def masked_point_inputs(points, features, mask):
 def require_mask_aware_batch_norm(module):
     """Do not silently pad a network containing an unadapted native BN."""
     if any(not isinstance(m, _BatchNorm) for m in batch_norms(module)):
-        raise TypeError("Ragged point batches require pinn_engine.normalization BatchNorm layers")
+        raise TypeError("Ragged point batches require pinn_engine.networks.normalization BatchNorm layers")
 
 
 def _checked_mask(tensor, mask):
