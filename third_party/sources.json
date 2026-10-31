@@ -2,8 +2,9 @@
   "imported_on": "2026-10-28",
   "neural3dbench": {
     "url": "https://github.com/n94kholdi/neural3dbench",
-    "commit": "f56080e5a2f931b66b2bc57226cd7c2e657a8d0b",
-    "selection": "All Git-tracked files; Git history excluded"
+    "commit": "1b635f4d1c3b47fab5c9e9a46b1824b789e478ee",
+    "selection": "All Git-tracked files; Git history excluded",
+    "updated_on": "2026-10-31"
   },
   "geocore": {
     "archive": "geometry - py.rar",
