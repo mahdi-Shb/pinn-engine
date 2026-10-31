@@ -29,7 +29,7 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
 ## Files
 
 - [Signature and wildcard axes](docs/signature.fa.md): preserved axis names
-  promise sample independence. Signatures containing `"..."` let the model
+  default to sample independence, with explicit `independence` overrides. Signatures containing `"..."` let the model
   handle named Values directly, with no automatic mapping or permutation.
 - [GeoCore wrapper](docs/geocore.fa.md): sequential CPU generation of design
   variants as named Tensor lists, with [a runnable example](examples/geocore_design.py).

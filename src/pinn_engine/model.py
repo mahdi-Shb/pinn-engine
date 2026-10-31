@@ -21,9 +21,9 @@ class Signature:
     (point,) passes the full point axis, for example for attention or integration.
     Core axes may also appear in outputs, for example for a graph network that
     predicts at its input points. Reusing a name preserves sample identity and
-    length AND sample independence along that axis. A function mixing samples
-    must rename that output axis. This is the author's promise, not something
-    the engine can prove by inspecting arbitrary evaluate implementations.
+    length. Sample independence defaults to True for preserved axes and can be
+    disabled with independence={"point": False}. This is the author's promise,
+    not something the engine can prove by inspecting arbitrary evaluate code.
     Rename an output axis when its sample identity, ordering, or length changes.
     AD compatibility belongs to the requested derivative path, not this class.
     Additional runtime batch axes are not included in this signature.
@@ -41,6 +41,7 @@ class Signature:
 
     inputs: Mapping[Quantity, str | Sequence[str]]
     outputs: Mapping[Quantity, str | Sequence[str]]
+    independence: Mapping[str, bool] | None = None
 
     def __post_init__(self) -> None:
         # Validate declarations locally instead of retaining a global registry.
@@ -68,6 +69,24 @@ class Signature:
         ):
             raise ValueError("An output wildcard requires an input wildcard")
 
+        if self.independence is not None and not isinstance(self.independence, Mapping):
+            raise TypeError("Signature.independence must be a mapping or None")
+        input_axes = {a for axes in self.inputs.values() for a in axes}
+        output_axes = {a for axes in self.outputs.values() for a in axes}
+        common = input_axes & output_axes
+        # Copy declarations and materialize defaults for statically shared axes.
+        rules = {a: True for a in sorted(common)}
+        for axis, independent in (self.independence or {}).items():
+            if not isinstance(axis, str):
+                raise TypeError("Independence keys must be axis names")
+            _axes(axis)
+            if type(independent) is not bool:
+                raise TypeError("Independence values must be bool")
+            if axis not in common and not ("..." in common and axis != "..."):
+                raise ValueError(f"Independence axis {axis!r} is not shared by inputs and outputs")
+            rules[axis] = independent
+        object.__setattr__(self, "independence", rules)
+
     @property
     def has_ellipsis(self) -> bool:
         return any("..." in axes for side in (self.inputs, self.outputs) for axes in side.values())
@@ -85,6 +104,20 @@ class Signature:
             a for q, pattern in self.inputs.items() if "..." in pattern
             for a in values[q].axes if a not in explicit
         ))
+
+    def dependent_axes(self, incoming: Value, outgoing: Value, inputs) -> set[str]:
+        """Resolve False declarations for one input/output relation.
+
+        Named rules override the wildcard rule. A wildcard only covers its
+        captured group; an explicit core axis is governed by its own rule.
+        """
+        captured = set(self.wildcard_axes(inputs)) if self.has_ellipsis else set()
+        return {
+            axis for axis in set(incoming.axes) & set(outgoing.axes)
+            if not self.independence.get(
+                axis, self.independence.get("...", True) if axis in captured else True
+            )
+        }
 
     @classmethod
     def from_string(cls, text: str) -> Signature:
@@ -309,4 +342,10 @@ class Model(nn.Module, ABC):
             expected = expand(signature.outputs[quantity], captured)
             if value.axes != expected:
                 raise ValueError(f"Output axes for {quantity.name!r} do not match wildcard signature")
+        shared = set(a for value in values.values() for a in value.axes) & set(
+            a for value in result.values() for a in value.axes
+        )
+        unknown = set(signature.independence) - {"..."} - shared
+        if unknown:
+            raise ValueError(f"Independence axes are not shared at runtime: {sorted(unknown)}")
         return result

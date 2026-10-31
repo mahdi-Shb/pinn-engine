@@ -19,45 +19,56 @@ def _validate_alignment(graph, request, values):
     """Reject compressed shared axes when the declared graph may mix samples.
 
     This checks signature metadata only; it neither schedules nor differentiates
-    individual models. Distinct axis names request the full cross-axis Jacobian.
+    individual models. Explicit False rules are rejected on any relevant path,
+    even if a later reduction removes the declared axis. Existing full-Jacobian
+    layouts with distinct axis names remain supported when no False rule blocks them.
     """
     shared = set(values[request.of].axes) & set(values[request.wrt].axes)
-    if not shared:
-        return
     memo = {}
+
+    def blocked_axes(index, incoming, outgoing):
+        model = graph.models[index]
+        inputs = {q: values[q] for q in model.inputs}
+        return model.signature.dependent_axes(values[incoming], values[outgoing], inputs)
 
     def dependence(quantity):
         if quantity == request.wrt:
-            return True, set()
+            return True, set(), set()
         if quantity in memo:
             return memo[quantity]
         node = graph.producer_node(quantity)
         if node is None:
-            return False, set()
+            return False, set(), set()
         if node == graph.producer_node(request.wrt) and node[0] == "model":
             # Shared output-axis names promise independence, including siblings.
             # Renamed or reduced axes lose that guarantee.
-            return True, set(values[request.wrt].axes) - set(values[quantity].axes)
-        active, mixed = False, set()
+            return (True, set(values[request.wrt].axes) - set(values[quantity].axes),
+                    blocked_axes(node[1], request.wrt, quantity))
+        active, mixed, blocked = False, set(), set()
         for incoming in graph.dependencies[node]:
-            depends, consumed = dependence(incoming)
+            depends, consumed, prior_blocked = dependence(incoming)
             if depends:
                 active = True
                 mixed.update(consumed)
+                blocked.update(prior_blocked)
                 if node[0] == "model":
-                    # Preserved names promise independence regardless of whether
-                    # evaluate saw a full core axis, a list, or a wildcard group.
+                    # Preserved names default to independence, but explicit False
+                    # rules remain blocked on every downstream dependent path.
                     # Never forget a reduction if a later node broadcasts it back.
                     mixed.update(set(values[incoming].axes) - set(values[quantity].axes))
-        memo[quantity] = active, mixed
-        return active, mixed
+                    blocked.update(blocked_axes(node[1], incoming, quantity))
+        memo[quantity] = active, mixed, blocked
+        return active, mixed, blocked
 
-    _, mixed = dependence(request.of)
-    if shared & mixed:
+    _, mixed, blocked = dependence(request.of)
+    unsupported = blocked | (shared & mixed)
+    if unsupported:
         raise NotImplementedError(
             "Autograd across non-independent sample axes is not supported: "
-            f"{sorted(shared & mixed)}. Use distinct input/output axis names "
-            "to request the full cross-axis Jacobian."
+            f"{sorted(unsupported)} for {request.name}. "
+            "A relevant model path declares or introduces dependent samples; "
+            "this AD backend does not support that derivative. "
+            "A later independent model does not restore independence."
         )
 
 
