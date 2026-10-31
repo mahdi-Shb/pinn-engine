@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 from .quantities import Quantity
 from .values import Value, _axes, _check_value
 from .derivatives import _related_quantities
@@ -159,6 +160,11 @@ class Model(nn.Module, ABC):
     constructors are free to accept whatever they need.
     """
 
+    # Opt in only for replay-safe computations. The whole mapped call is
+    # checkpointed, including when no extra dense batch axes are present.
+    # Ragged batch members get separate checkpoints through _map_list_axis.
+    checkpoint_batches = False
+
     @property
     @abstractmethod
     def signature(self) -> Signature:
@@ -276,8 +282,13 @@ class Model(nn.Module, ABC):
                 randomness=getattr(self, "vmap_randomness", "error"),
             )
 
+        # Enter checkpoint outside all vmap transforms so backward can replay
+        # fresh mapped calls rather than retain tensors from an expired vmap.
+        result = (checkpoint(mapped, *arguments, use_reentrant=False)
+                  if self.checkpoint_batches and torch.is_grad_enabled()
+                  else mapped(*arguments))
         outputs = {}
-        for quantity, tensor in zip(signature.outputs, mapped(*arguments)):
+        for quantity, tensor in zip(signature.outputs, result):
             core = tuple(signature.outputs[quantity])
             # A list axis stays outermost, including when dense batch axes are mapped.
             axes = (core[0],) + batch + core[1:] if isinstance(tensor, list) else batch + core

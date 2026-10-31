@@ -96,6 +96,9 @@ class GINO(BaseNetwork):
     """Geometry-aware point-to-grid, Fourier, and grid-to-point operator."""
 
     config_class = GINOConfig
+    # Model.forward checkpoints the complete call after building its vmaps.
+    # Inner kernel checkpoints stay off in evaluate to avoid nested transforms.
+    checkpoint_batches = True
 
     def __init__(
         self,

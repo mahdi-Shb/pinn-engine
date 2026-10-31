@@ -54,7 +54,11 @@ result.tensor.square().mean().backward()
 
 `model(values)` و `Solver` فقط خروجی‌های انتخاب‌شدهٔ عددی را تحویل می‌دهند. `model.predict(ModelInput(...))` مسیر عددی با شکل‌های اصلی Neural3DBench است و `ModelOutput`، auxiliary و metadata را حفظ می‌کند. کد آن خروجی‌ها حذف نشده است. الگوریتم اصلی ممکن است head خروجی انتخاب‌نشده را هم اجرا کند؛ حذف محاسبهٔ headها در این تغییر پیاده نشده است.
 
-برای امکان vmap، GINO در مسیر Model از ماسک با طول ثابت به جای boolean indexing استفاده می‌کند و activation checkpoint را خاموش می‌کند؛ این مسیر ممکن است حافظهٔ آموزش بیشتری بخواهد. در `predict(ModelInput)` checkpoint موجود همچنان فعال است. محدودیت workspace زوج‌نقاط و chunkهای kernel حفظ شده است.
+برای امکان vmap، GINO از ماسک با طول ثابت به جای boolean indexing استفاده می‌کند. در مسیر Model، checkpoint داخلی kernel خاموش است ولی موتور **کل تابع batch‌شده را بیرون تمام vmapها** با `use_reentrant=False` checkpoint می‌کند. batching خودکار حفظ می‌شود و نتایج میانی کمتری برای backward ذخیره می‌شوند؛ در عوض، هنگام مشتق‌گیری محاسبات دوباره اجرا می‌شوند و ناحیهٔ replay بزرگ‌تر از chunkهای kernel قبلی است. محدودیت workspace زوج‌نقاط و chunkهای kernel حفظ شده است. کاهش حافظهٔ ذخیره‌شده برای backward به معنی تضمین مقدار مشخصی از کاهش peak حافظه یا سرعت نیست.
+
+این رفتار فقط برای GINO با `checkpoint_batches=True` پیش‌فرض فعال است؛ برای مقایسه می‌توان روی instance مقدار False گذاشت. در مدل‌های دیگر پیش‌فرض False است. این گزینه به مسیر عادی batching موتور مربوط است؛ مسیر wildcard مدل، batching را خودش مدیریت می‌کند. در batch لیستی برای هر عضو checkpoint جدا و در حالت بدون محور batch نیز یک checkpoint روی فراخوانی core ساخته می‌شود. در `torch.no_grad()` موتور checkpoint را کنار می‌گذارد. در `predict(ModelInput)` checkpoint داخلی قبلی همچنان فعال است.
+
+checkpoint نیازمند محاسبهٔ قابل replay است؛ نباید آن را بدون بررسی برای مدل‌های دارای تغییر state مانند آمار BatchNorm فعال کرد. خروجی، گرادیان‌ها و مشتق‌های تا مرتبهٔ سوم GINO، از جمله مشتق‌های query در Solver و آموزش با loss شامل مشتق مرتبهٔ سوم، با مسیر بدون checkpoint تست شده‌اند. پشتیبانی همهٔ ترکیب‌های torch.func یا compile از این تست‌ها نتیجه نمی‌شود.
 
 کد شبکه‌ها در `third_party/neural3dbench/models` نگه داشته شده ولی با نام اختصاصی `pinn_engine.neural3dbench` بسته‌بندی می‌شود؛ نصب پکیج عمومی `models` یا تغییر `sys.path` لازم نیست. مثال‌ها/تست‌های قدیمی upstream که constructor بدون inputs/outputs و فراخوانی مستقیم با ModelInput دارند، API قدیمی را نشان می‌دهند؛ مسیر جدید نمونهٔ بالاست.
 

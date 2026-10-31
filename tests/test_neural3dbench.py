@@ -657,3 +657,111 @@ def test_selected_auxiliary_and_metadata_outputs_remain_available_through_predic
     assert "physical_coordinates" in result.metadata
     assert result.latent is not None
     assert set(model({xyz: Value(request.coordinates[0], "point")})) == {field}
+
+
+@pytest.mark.parametrize("layout", ("dense", "ragged", "unbatched"))
+def test_gino_outer_checkpoint_matches_third_order_ad_and_training(layout):
+    xyz, features, field = Quantity("xyz", (3,)), Quantity("features"), Quantity("field")
+    model = networks.GINO(configuration("GINO"),
+                          inputs={"coordinates": xyz, "point_features": features},
+                          outputs={"predictions": field}).double()
+    assert model.checkpoint_batches is True
+    reference = copy.deepcopy(model)
+    reference.checkpoint_batches = False
+    shape = (2, 2, 4) if layout == "dense" else (4,)
+    points = torch.rand(*shape, 3, dtype=torch.double)
+    source = torch.rand(shape, dtype=torch.double)
+    if layout == "ragged":
+        points, source = [points, points[:3].clone()], [source, source[:3].clone()]
+    axes = {"dense": ("family", "scenario", "point"), "ragged": ("case", "point"),
+            "unbatched": ("point",)}[layout]
+
+    def run(network):
+        leaves = source if isinstance(source, list) else [source]
+        targets = [t.clone().requires_grad_() for t in leaves]
+        output = network({xyz: Value(points, axes),
+                          features: Value(targets if layout == "ragged" else targets[0], axes)})[field]
+        tensors = output.tensor if isinstance(output.tensor, list) else [output.tensor]
+        loss = sum(t.square().sum() for t in tensors)
+        derivatives = []
+        objective = loss
+        for _ in range(3):
+            derivative = torch.autograd.grad(objective, targets, create_graph=True, retain_graph=True)
+            derivatives.append(derivative)
+            objective = sum(t.sum() for t in derivative)
+        # A loss containing higher derivatives must still train the network.
+        (loss + sum(t.square().sum() for t in derivatives[-1])).backward()
+        return tensors, derivatives, [p.grad for p in network.parameters()]
+
+    actual, expected = run(model), run(reference)
+    for group_a, group_b in zip(actual, expected):
+        for a, b in zip(group_a, group_b):
+            if isinstance(a, tuple):
+                for aa, bb in zip(a, b):
+                    assert torch.isfinite(aa).all()
+                    torch.testing.assert_close(aa, bb)
+            elif a is None:
+                assert b is None
+            else:
+                assert torch.isfinite(a).all()
+                torch.testing.assert_close(a, b)
+
+
+@pytest.mark.parametrize("chunk_size", (1, 64))
+def test_gino_outer_checkpoint_solver_query_higher_derivatives(chunk_size):
+    xyz, features, query, field = (Quantity("xyz", (3,)), Quantity("features"),
+                                     Quantity("query", (3,)), Quantity("field"))
+    model = networks.GINO(configuration("GINO"),
+                          inputs={"coordinates": xyz, "point_features": features, "query_coordinates": query},
+                          outputs={"predictions": field}).double()
+    reference = copy.deepcopy(model)
+    reference.checkpoint_batches = False
+    first = Derivative(field, query)
+    second = Derivative(first, query)
+    third = Derivative(second, query)
+    values = {xyz: Value(torch.rand(2, 4, 3, dtype=torch.double), ("scenario", "point")),
+              features: Value(torch.rand(2, 4, dtype=torch.double), ("scenario", "point")),
+              query: Value(torch.rand(2, 2, 3, dtype=torch.double), ("scenario", "query"))}
+    results = []
+    for network in (model, reference):
+        results.append(Solver([network], outputs=(first, second, third),
+                              derivative_chunk_size=chunk_size)(values))
+        results[-1][third].tensor.square().sum().backward()
+    for request in (first, second, third):
+        assert results[0][request].axes == ("scenario", "query")
+        assert torch.isfinite(results[0][request].tensor).all()
+        torch.testing.assert_close(results[0][request].tensor, results[1][request].tensor)
+    for a, b in zip(model.parameters(), reference.parameters()):
+        if a.grad is None:
+            assert b.grad is None
+        else:
+            assert torch.isfinite(a.grad).all()
+            torch.testing.assert_close(a.grad, b.grad)
+
+
+def test_gino_checkpoint_reduces_saved_tensors_without_requiring_input_gradients():
+    model, _, outputs, values, *_ = reference_case("GINO")
+    saved_bytes = []
+    for enabled in (False, True):
+        model.checkpoint_batches = enabled
+        sizes = []
+        def pack(tensor):
+            sizes.append(tensor.numel() * tensor.element_size())
+            return tensor
+        model.zero_grad(set_to_none=True)
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda tensor: tensor):
+            result = model(values)[outputs["predictions"]].tensor
+        result.square().sum().backward()
+        assert model.output_projection.weight.grad is not None
+        saved_bytes.append(sum(sizes))
+    # This measures saved Tensor payload, not peak allocator/GPU memory.
+    assert saved_bytes[1] < saved_bytes[0]
+    with torch.no_grad():
+        result = model(values)[outputs["predictions"]].tensor
+        assert not result.requires_grad
+
+
+def test_only_gino_enables_outer_checkpoint_by_default():
+    for kind in ALL_NETWORKS:
+        model, *_ = reference_case(kind)
+        assert model.checkpoint_batches is (kind == "GINO")
