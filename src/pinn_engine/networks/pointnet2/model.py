@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from pinn_engine.quantities import Quantity
+from pinn_engine.normalization import normalization_mask, masked_point_inputs
 
 import torch
 
@@ -190,20 +191,22 @@ class PointNet2(BaseNetwork):
             else torch.as_tensor(inputs.point_mask, device=points.device, dtype=torch.bool)
         )
 
-        global_feature, level_points, level_features, level_masks = self.encoder(
-            points, features, mask
-        )
-        if self.config.task == "classification":
-            predictions = self.head(global_feature)
-        else:
-            predictions = self.head(
-                points,
-                features,
-                mask,
-                level_points,
-                level_features,
-                level_masks,
+        points, features = masked_point_inputs(points, features, mask if inputs.point_mask is not None else None)
+        with normalization_mask(mask, enabled=inputs.point_mask is not None):
+            global_feature, level_points, level_features, level_masks = self.encoder(
+                points, features, mask
             )
+            if self.config.task == "classification":
+                predictions = self.head(global_feature)
+            else:
+                predictions = self.head(
+                    points,
+                    features,
+                    mask,
+                    level_points,
+                    level_features,
+                    level_masks,
+                )
         return ModelOutput(
             predictions=predictions,
             latent=global_feature,

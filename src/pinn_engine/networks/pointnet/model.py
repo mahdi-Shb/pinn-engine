@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from pinn_engine.quantities import Quantity
+from pinn_engine.normalization import normalization_mask, masked_point_inputs
 
 import torch
 
@@ -46,8 +47,8 @@ class PointNetConfig(BaseModelConfig):
             raise ValueError("global_dim must be positive.")
         if self.task not in {"classification", "segmentation"}:
             raise ValueError("task must be 'classification' or 'segmentation'.")
-        if self.normalization not in {"batch", "none"}:
-            raise ValueError("normalization must be batch or none.")
+        if self.normalization not in {"batch", "instance", "none"}:
+            raise ValueError("normalization must be batch, instance, or none.")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in the range [0, 1).")
 
@@ -162,13 +163,15 @@ class PointNet(BaseNetwork):
         if inputs.point_mask is not None:
             mask = torch.as_tensor(inputs.point_mask, device=parameter.device, dtype=torch.bool)
 
-        local, global_feature, transforms = self.encoder(points, features, mask)
-        if self.config.task == "classification":
-            predictions = self.head(global_feature)
-        else:
-            predictions = self.head(local, global_feature)
-            if mask is not None:
-                predictions = predictions.masked_fill(~mask.unsqueeze(-1), 0.0)
+        points, features = masked_point_inputs(points, features, mask)
+        with normalization_mask(mask, enabled=mask is not None):
+            local, global_feature, transforms = self.encoder(points, features, mask)
+            if self.config.task == "classification":
+                predictions = self.head(global_feature)
+            else:
+                predictions = self.head(local, global_feature)
+                if mask is not None:
+                    predictions = predictions.masked_fill(~mask.unsqueeze(-1), 0.0)
 
         return ModelOutput(
             predictions=predictions,

@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 import torch
 from torch import nn
+from pinn_engine.normalization import BatchNorm2d, normalization_mask, has_normalization_mask
 
 
 def square_distance(source: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -144,7 +145,7 @@ class SharedPointMLP2d(nn.Module):
                 )
             )
             if normalization == "batch":
-                layers.append(nn.BatchNorm2d(output_channels))
+                layers.append(BatchNorm2d(output_channels))
             layers.append(nn.ReLU(inplace=True))
         self.layers = nn.Sequential(*layers)
 
@@ -217,7 +218,12 @@ class SetAbstraction(nn.Module):
                 grouped_features = index_points(features, group_indices)
             grouped = torch.cat((relative_points, grouped_features), dim=-1)
 
-        encoded = self.mlp(grouped.permute(0, 3, 2, 1))
+        # Original radius grouping repeats a real neighbor in unused slots;
+        # retain that weighting. Only added padding/invalid centroids are new.
+        norm_mask = (grouped_mask.permute(0, 2, 1) if self.group_all else
+                     centroid_mask[:, None, :].expand(-1, grouped.shape[2], -1))
+        with normalization_mask(norm_mask, enabled=has_normalization_mask()):
+            encoded = self.mlp(grouped.permute(0, 3, 2, 1))
         encoded = encoded.masked_fill(
             ~grouped_mask.permute(0, 2, 1).unsqueeze(1),
             torch.finfo(encoded.dtype).min,
@@ -268,7 +274,8 @@ class FeaturePropagation(nn.Module):
         combined = interpolated
         if target_features is not None:
             combined = torch.cat((target_features, interpolated), dim=-1)
-        propagated = self.mlp(combined.transpose(1, 2)).transpose(1, 2)
+        with normalization_mask(target_mask, enabled=has_normalization_mask()):
+            propagated = self.mlp(combined.transpose(1, 2)).transpose(1, 2)
         return propagated.masked_fill(~target_mask.unsqueeze(-1), 0.0)
 
 

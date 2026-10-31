@@ -5,7 +5,7 @@
     "commit": "1b635f4d1c3b47fab5c9e9a46b1824b789e478ee",
     "selection": "All Git-tracked files; Git history excluded",
     "updated_on": "2026-10-31",
-    "local_changes": "models converted to native pinn_engine.Model classes; packaged as pinn_engine.networks; fixed-shape GINO masks and vmap-compatible PointNet2/DeepNURBS",
+    "local_changes": "models converted to native pinn_engine.Model classes; packaged as pinn_engine.networks; fixed-shape GINO masks and vmap-compatible PointNet2/DeepNURBS; shared list/masked normalization and PointNet instance mode; ragged point-batch adapter",
     "source_path": "src/pinn_engine/networks"
   },
   "geocore": {

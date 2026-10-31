@@ -39,6 +39,10 @@ for optional trimesh operations. `dev` installs the test dependency and
   including its native runtime libraries.
 - [src/pinn_engine/networks/](src/pinn_engine/networks/): native network Models
   and their shared input/output contract.
+- [src/pinn_engine/normalization.py](src/pinn_engine/normalization.py): shared
+  dense/list/masked BatchNorm and per-case point normalization.
+  [Normalization details](docs/normalization.fa.md) and
+  [upstream change audit](docs/network_upstream_changes.fa.md) document the boundary.
 - [third_party/](third_party/): provenance, original documentation, benchmark
   utilities, examples, and tests retained as reference; active runtime packages
   live in `src/`.

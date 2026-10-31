@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 import torch
 from torch import nn
+from pinn_engine.normalization import BatchNorm3d
 from torch.nn import functional as F
 
 
@@ -25,7 +26,7 @@ def _activation(name: str) -> nn.Module:
 
 def _normalization(name: str, channels: int) -> nn.Module:
     if name == "batch":
-        return nn.BatchNorm3d(channels)
+        return BatchNorm3d(channels)
     if name == "instance":
         return nn.InstanceNorm3d(channels, affine=True)
     if name == "group":

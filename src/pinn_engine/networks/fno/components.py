@@ -4,6 +4,7 @@ from collections.abc import Callable, Sequence
 
 import torch
 from torch import nn
+from pinn_engine.normalization import BatchNorm3d
 
 from .spectral import SpectralConv3d
 
@@ -49,7 +50,7 @@ class FourierOperatorBlock3d(nn.Module):
         if normalization == "none":
             self.normalization: nn.Module = nn.Identity()
         elif normalization == "batch":
-            self.normalization = nn.BatchNorm3d(width)
+            self.normalization = BatchNorm3d(width)
         elif normalization == "instance":
             self.normalization = nn.InstanceNorm3d(width, affine=True)
         else:

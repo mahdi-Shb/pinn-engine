@@ -582,3 +582,10 @@ Signature ورودی اختیاری independence از نوع dict[str,bool] می
 GeoCore به صورت پکیج مستقل به src/geocore منتقل شد و import geocore حفظ شد. شبکه‌های همکاران با نام عمومی‌تر pinn_engine.networks در src/pinn_engine/networks قرار گرفتند و helper قراردادشان از ریشهٔ موتور به networks/_contract.py منتقل شد. نام neural3dbench فقط برای provenance/فایل‌های مرجع باقی می‌ماند؛ import اجرایی قدیمی به pinn_engine.networks تغییر کرده است. اسناد جاری در docs/networks.fa.md هستند.
 
 setuptools اکنون پکیج‌ها را مستقیماً از src پیدا می‌کند و mapping ویژه به third_party حذف شد. یک نصب ریشه هر دو پکیج را ارائه می‌کند؛ dependencyهای عددی geometry اختیاری‌اند و با extra geometry نصب می‌شوند. DLL/dylibهای همراه GeoCore و مجوزها در package data حفظ شده‌اند. فایل‌های مرجع upstream در third_party مانده‌اند و pyprojectهای اولیهٔ آن‌ها مسیر نصب جاری نیستند. checkpoint بیرون vmap در Model و فعال‌بودن آن برای GINO حفظ شده است.
+
+
+## نرمال‌سازی مشترک و BatchNorm لیستی — ۲۰۲۶-۱۰-۳۱
+
+منطق BatchNorm Tensor/list/mask به pinn_engine/normalization.py منتقل شد. آمار مشترک از نمونه‌های واقعی با وزن برابر هر نقطه می‌آید و running statistics یک‌بار در فراخوانی به‌روز می‌شود. قرارداد ragged قبلی برای PointNet/PointNet++ جایگزین شد: adapter بیرونی padding داخلی می‌سازد، mask از طریق context محدود به همان فراخوانی به normalization می‌رسد، و پس از اجرای یکبارهٔ شبکه خروجی به لیست اولیه برمی‌گردد. انتخاب padding برای حفظ بدنهٔ اصلی شبکه و کم‌بودن تغییرات است و هزینهٔ محاسبات/حافظهٔ آن حذف نشده است. شبکه‌های grid به adapter مستقل نیاز دارند و این تغییر ادعای پشتیبانی ragged کامل آن‌ها را ندارد.
+
+طبق تأیید کاربر، PointNet گزینهٔ instance را برای نرمال‌سازی فقط روی point دارد؛ بعد از pooling در این حالت normalization نداریم. BatchNorm پیش‌فرض قبلی و حالت none حفظ شده‌اند. استقلال point همچنان False و استقلال batch برای instance برقرار است. ماسک صریح PointNet/PointNet++ اکنون آمار normalization را هم محدود می‌کند؛ این رفتار جدید است. محتوای عددی encoder، T-Net، headها و بلوک‌های اصلی در گزارش تطبیق با منبع بررسی شده و تغییرات واقعی رابط/vmap/normalization جدا ثبت شده‌اند؛ ادعا نمی‌شود که پشتیبانی ragged از قبل در کد همکار بوده است.

@@ -335,18 +335,20 @@ def test_non_batchnorm_training_dropout_works_under_nested_vmap():
     assert any(parameter.grad is not None for parameter in model.parameters())
 
 
-def test_unequal_batchnorm_lists_reject_training_before_statistics_change_but_support_eval():
+@pytest.mark.parametrize("kind", ("PointNet", "PointNet2"))
+def test_unequal_batchnorm_lists_train_once_and_support_eval(kind):
     xyz, field = Quantity("xyz", (3,)), Quantity("field")
-    model = networks.PointNet(configuration("PointNet", normalization="batch"),
-                              inputs={"coordinates": xyz}, outputs={"predictions": field}).train()
+    model = getattr(networks, kind)(configuration(kind, normalization="batch"),
+                                   inputs={"coordinates": xyz}, outputs={"predictions": field}).train()
     members = [torch.rand(5, 3), torch.rand(8, 3)]
     values = {xyz: Value(members, ("case", "point"))}
-    # Padding would alter BatchNorm statistics; silently padding is incorrect.
-    with pytest.raises(ValueError, match="Ragged BatchNorm"):
-        model(values)
+    training = model(values)[field]
+    sum(t.square().mean() for t in training.tensor).backward()
+    assert all(torch.isfinite(t).all() for t in training.tensor)
+    assert any(p.grad is not None for p in model.parameters())
     for module in model.modules():
         if isinstance(module, nn.modules.batchnorm._BatchNorm):
-            assert module.num_batches_tracked.item() == 0
+            assert module.num_batches_tracked.item() == 1
     model.eval()
     actual = model(values)[field]
     assert actual.axes == ("case", "point") and isinstance(actual.tensor, list)
@@ -765,3 +767,134 @@ def test_only_gino_enables_outer_checkpoint_by_default():
     for kind in ALL_NETWORKS:
         model, *_ = reference_case(kind)
         assert model.checkpoint_batches is (kind == "GINO")
+
+
+@pytest.mark.parametrize("task", ("classification", "segmentation"))
+def test_point_instance_norm_maps_ragged_cases_without_batchnorm(task):
+    xyz, mask, field = Quantity("xyz", (3,)), Quantity("valid"), Quantity("field")
+    model = networks.PointNet(configuration("PointNet", normalization="instance", task=task,
+                                            input_transform=True, feature_transform=True),
+                              inputs={"coordinates": xyz, "point_mask": mask},
+                              outputs={"predictions": field}).double()
+    assert not model.signature.has_ellipsis
+    assert not any(isinstance(m, nn.modules.batchnorm._BatchNorm) for m in model.modules())
+    assert isinstance(model.encoder.input_transform.bn1, nn.Identity)
+    assert isinstance(model.encoder.input_transform.bn2, nn.Identity)
+    members = [torch.rand(2, 5, 3, dtype=torch.double, requires_grad=True),
+               torch.rand(2, 8, 3, dtype=torch.double, requires_grad=True)]
+    masks = [torch.ones(t.shape[:2], dtype=torch.bool) for t in members]
+    masks[0][:, -1] = False
+    actual = model({xyz: Value(members, ("geometry", "scenario", "point")),
+                    mask: Value(masks, ("geometry", "scenario", "point"))})[field]
+    assert actual.axes == (("geometry", "scenario") if task == "classification"
+                           else ("geometry", "scenario", "point"))
+    for i, points in enumerate(members):
+        reference = model.predict(ModelInput(coordinates=points, point_mask=masks[i])).predictions[..., 0]
+        torch.testing.assert_close(actual.tensor[i], reference)
+    sum(t.square().sum() for t in actual.tensor).backward()
+    assert all(torch.isfinite(t.grad).all() for t in members)
+
+
+def test_ragged_pointnet_bn_uses_real_point_statistics_with_tnets_and_dense_scenarios():
+    xyz, field = Quantity("xyz", (3,)), Quantity("field")
+    model = networks.PointNet(configuration("PointNet", normalization="batch"),
+                              inputs={"coordinates": xyz}, outputs={"predictions": field}).double()
+    points = [torch.rand(2, 3, 3, dtype=torch.double, requires_grad=True),
+              torch.rand(2, 7, 3, dtype=torch.double, requires_grad=True)]
+    # Compute the first layer's expected moments on real inputs, without any
+    # reference to the adapter's padding layout or its normalization helper.
+    convolution, bn = model.encoder.first_mlp.layers[:2]
+    real = torch.cat([convolution(t.transpose(1, 2)).movedim(1, -1).reshape(-1, 64) for t in points])
+    expected_mean, expected_var = real.mean(0), real.var(0, unbiased=True)
+    actual = model({xyz: Value(points, ("geometry", "scenario", "point"))})[field]
+    torch.testing.assert_close(bn.running_mean, .1 * expected_mean)
+    torch.testing.assert_close(bn.running_var, .9 + .1 * expected_var)
+    sum(t.square().sum() for t in actual.tensor).backward()
+    assert all(torch.isfinite(t.grad).all() for t in points)
+
+    # Enable both original T-Nets too: their pooled BNs must see all four
+    # embeddings at once, while their pointwise BNs exclude padding.
+    transforms = networks.PointNet(configuration("PointNet", normalization="batch",
+                                                  input_transform=True, feature_transform=True),
+                                    inputs={"coordinates": xyz}, outputs={"predictions": field}).double()
+    result = transforms({xyz: Value(points, ("geometry", "scenario", "point"))})[field]
+    sum(t.square().sum() for t in result.tensor).backward()
+    for module in transforms.modules():
+        if isinstance(module, nn.modules.batchnorm._BatchNorm):
+            assert module.num_batches_tracked == 1
+    assert all(torch.isfinite(p.grad).all() for p in transforms.parameters() if p.grad is not None)
+
+
+@pytest.mark.parametrize("kind", ("PointNet", "PointNet2"))
+def test_added_padding_does_not_change_point_network_training_or_gradients(kind):
+    xyz, mask, field = Quantity("xyz", (3,)), Quantity("valid"), Quantity("field")
+    config = configuration(kind, normalization="batch")
+    if kind == "PointNet":
+        config.input_transform = config.feature_transform = True
+    model = getattr(networks, kind)(config, inputs={"coordinates": xyz, "point_mask": mask},
+                                   outputs={"predictions": field}).double()
+    reference = copy.deepcopy(model)
+    real = torch.rand(2, 5, 3, dtype=torch.double, requires_grad=True)
+    copies = [real[0].detach().clone().requires_grad_(), real[1].detach().clone().requires_grad_()]
+    # The second representation has extra masked slots, containing NaNs on
+    # purpose. Neither feature statistics nor valid predictions may change.
+    padded = torch.cat((copies[1], torch.full((3, 3), float("nan"), dtype=torch.double)))
+    actual = model({xyz: Value([copies[0], padded], ("case", "point")),
+                    mask: Value([torch.ones(5, dtype=torch.bool),
+                                 torch.arange(8) < 5], ("case", "point"))})[field].tensor
+    expected = reference({xyz: Value(real, ("case", "point")),
+                          mask: Value(torch.ones(2, 5, dtype=torch.bool), ("case", "point"))})[field].tensor
+    dense_reference = copy.deepcopy(model)
+    # The same explicit mask must work in a dense padded request as well.
+    # Restore initial buffers so both calls represent the same training step.
+    for module in dense_reference.modules():
+        if isinstance(module, nn.modules.batchnorm._BatchNorm):
+            module.reset_running_stats()
+    dense_points = torch.cat((real.detach(), torch.full((2, 3, 3), float("nan"), dtype=torch.double)), 1)
+    dense = dense_reference.predict(ModelInput(coordinates=dense_points,
+                                               point_mask=(torch.arange(8)[None] < 5).expand(2, 8)))
+    for i in range(2):
+        torch.testing.assert_close(dense.predictions[i, :5, 0], expected[i])
+    for i in range(2):
+        torch.testing.assert_close(actual[i][:5], expected[i])
+    sum(t.square().sum() for t in actual).backward()
+    expected.square().sum().backward()
+    for i in range(2):
+        torch.testing.assert_close(copies[i].grad, real.grad[i])
+    for key, value in model.state_dict().items():
+        torch.testing.assert_close(value, reference.state_dict()[key])
+    for a, b in zip(model.parameters(), reference.parameters()):
+        if a.grad is not None:
+            torch.testing.assert_close(a.grad, b.grad)
+
+
+@pytest.mark.parametrize("kind", ("PointNet", "PointNet2", "FNO3D", "UNet3D", "GAT"))
+def test_dense_batchnorm_keeps_original_native_pytorch_numerics(kind):
+    model, bindings, outputs, values, numerical, *_ = reference_case(kind)
+    spelling = "batch_norm" if kind == "GAT" else "batch"
+    model = type(model)(configuration(kind, normalization=spelling), inputs=bindings, outputs=outputs).double()
+    original = copy.deepcopy(model)
+    # Replace only the extended layers by ordinary native PyTorch BN. The same
+    # original network code and parameter names must still work unchanged.
+    def restore_native(module):
+        for name, child in list(module.named_children()):
+            if isinstance(child, nn.modules.batchnorm._BatchNorm):
+                cls = next(c for c in (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)
+                           if isinstance(child, c))
+                native = cls(child.num_features).double()
+                native.load_state_dict(child.state_dict())
+                setattr(module, name, native)
+            else:
+                restore_native(child)
+    restore_native(original)
+    for field_name in numerical.__dataclass_fields__:
+        value = getattr(numerical, field_name)
+        if isinstance(value, torch.Tensor) and value.is_floating_point():
+            setattr(numerical, field_name, value.double())
+    actual, expected = model.predict(numerical), original.predict(numerical)
+    torch.testing.assert_close(actual.predictions, expected.predictions)
+    if actual.latent is not None:
+        torch.testing.assert_close(actual.latent, expected.latent)
+    assert set(model.state_dict()) == set(original.state_dict())
+    for key, value in model.state_dict().items():
+        torch.testing.assert_close(value, original.state_dict()[key])

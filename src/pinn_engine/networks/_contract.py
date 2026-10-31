@@ -10,11 +10,11 @@ from math import prod
 from typing import Mapping
 
 import torch
-from torch import nn
 
 from ..model import Signature
 from ..quantities import Quantity
 from ..values import Value, _check_value
+from ..normalization import batch_norms, uses_batch_statistics
 
 
 _GRAPHS = {"gcn", "gat", "meshgraphnet"}
@@ -95,20 +95,9 @@ def initialize_contract(model, inputs, outputs):
               {q: output_specs[r][0] for r, q in outputs.items()})
 
 
-def _batchnorms(model):
-    # Inspect actual modules: e.g. a one-layer GCN disables the final norm.
-    return [m for m in model.modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)]
-
-
-def _uses_batch_stats(model):
-    # Match PyTorch's eval behavior even when running statistics are absent.
-    return any(m.training or (m.running_mean is None and m.running_var is None)
-               for m in _batchnorms(model))
-
-
 def contract_signature(model):
     inputs, outputs, _ = _specs(model)
-    whole_batch = model.config.name in _GRAPHS or bool(_batchnorms(model))
+    whole_batch = model.config.name in _GRAPHS or bool(batch_norms(model))
     prefix = ("...",) if whole_batch else ()
     incoming = {q: prefix + inputs[r][0] for r, q in model.input_quantities.items()}
     outgoing = {q: prefix + outputs[r][0] for r, q in model.output_quantities.items()}
@@ -120,7 +109,7 @@ def contract_signature(model):
         rules["query"] = True
     if "..." in shared:
         # Frozen running statistics do not couple distinct batch members.
-        rules["..."] = not _uses_batch_stats(model)
+        rules["..."] = not uses_batch_statistics(model)
     return Signature(incoming, outgoing, rules)
 
 
@@ -272,8 +261,11 @@ def evaluate_contract(model, values):
 
     batch, list_axis, groups = _prepared_batches(model, values)
     shapes = {tuple(t.shape[1:] for t in raw.values()) for _, raw in groups}
-    if len(shapes) > 1 and _uses_batch_stats(model):
-        raise ValueError("Ragged BatchNorm training requires equal core sizes; padding would change its statistics")
+    if len(shapes) > 1 and model.config.name in {"pointnet", "pointnet2"}:
+        from ._point_batches import evaluate_ragged_points
+        return evaluate_ragged_points(model, batch, groups)
+    if len(shapes) > 1 and uses_batch_statistics(model):
+        raise ValueError("Ragged grid execution requires network-specific handling before BatchNorm")
     if len(shapes) == 1:
         # Equal-sized list members participate in one real BatchNorm batch too.
         raw = {r: torch.cat([g[r] for _, g in groups], dim=0) for r in groups[0][1]}

@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 import torch
 from torch import nn
+from pinn_engine.normalization import point_normalization
 
 
 def feature_transform_regularizer(transform: torch.Tensor) -> torch.Tensor:
@@ -53,8 +54,8 @@ class SharedPointMLP(nn.Module):
                 )
             )
             if final_activation or not is_last:
-                if normalization == "batch":
-                    layers.append(nn.BatchNorm1d(out_channels))
+                if normalization != "none":
+                    layers.append(point_normalization(normalization, out_channels))
                 layers.append(nn.ReLU(inplace=True))
         self.layers = nn.Sequential(*layers)
 
@@ -71,10 +72,10 @@ class TransformNet(nn.Module):
         self.point_mlp = SharedPointMLP(
             (feature_dim, 64, 128, 1024), normalization=normalization
         )
-        self.fc1 = nn.Linear(1024, 512, bias=normalization == "none")
-        self.bn1 = nn.BatchNorm1d(512) if normalization == "batch" else nn.Identity()
-        self.fc2 = nn.Linear(512, 256, bias=normalization == "none")
-        self.bn2 = nn.BatchNorm1d(256) if normalization == "batch" else nn.Identity()
+        self.fc1 = nn.Linear(1024, 512, bias=normalization != "batch")
+        self.bn1 = point_normalization(normalization, 512, pooled=True)
+        self.fc2 = nn.Linear(512, 256, bias=normalization != "batch")
+        self.bn2 = point_normalization(normalization, 256, pooled=True)
         self.fc3 = nn.Linear(256, feature_dim * feature_dim)
         self.activation = nn.ReLU(inplace=True)
 
@@ -162,19 +163,19 @@ class PointNetClassificationHead(nn.Module):
     ):
         super().__init__()
         layers: list[nn.Module] = [
-            nn.Linear(global_dim, 512, bias=normalization == "none")
+            nn.Linear(global_dim, 512, bias=normalization != "batch")
         ]
         if normalization == "batch":
-            layers.append(nn.BatchNorm1d(512))
+            layers.append(point_normalization(normalization, 512, pooled=True))
         layers.extend(
             (
                 nn.ReLU(inplace=True),
                 nn.Dropout(dropout),
-                nn.Linear(512, 256, bias=normalization == "none"),
+                nn.Linear(512, 256, bias=normalization != "batch"),
             )
         )
         if normalization == "batch":
-            layers.append(nn.BatchNorm1d(256))
+            layers.append(point_normalization(normalization, 256, pooled=True))
         layers.extend(
             (nn.ReLU(inplace=True), nn.Dropout(dropout), nn.Linear(256, output_dim))
         )

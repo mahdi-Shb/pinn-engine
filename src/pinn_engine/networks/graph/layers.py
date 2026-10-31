@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
+from pinn_engine.normalization import BatchNorm1d
 
 
 def _get_activation(name: str | None) -> nn.Module:
@@ -71,7 +72,7 @@ class GCNBlock(nn.Module):
         if self.normalization == "layer_norm":
             self.norm = nn.LayerNorm(out_features)
         elif self.normalization == "batch_norm":
-            self.norm = nn.BatchNorm1d(out_features)
+            self.norm = BatchNorm1d(out_features)
         elif self.normalization == "instance_norm":
             self.norm = nn.InstanceNorm1d(out_features)
         else:
@@ -236,7 +237,7 @@ class GATBlock(nn.Module):
         if self.normalization == "layer_norm":
             self.norm = nn.LayerNorm(out_features)
         elif self.normalization == "batch_norm":
-            self.norm = nn.BatchNorm1d(out_features)
+            self.norm = BatchNorm1d(out_features)
         else:
             self.norm = None
 
