@@ -112,7 +112,8 @@ def to_dot(graph, derivatives, direction: str = "LR", title: str = "Solver compu
         sig = model.signature
         core = tuple(dict.fromkeys(a for side in (sig.inputs, sig.outputs)
                                    for axes in side.values() for a in axes))
-        detail = "core axes: " + ", ".join(core) if core else "pointwise / no core sample axes"
+        detail = ("wildcard axes / Values" if sig.has_ellipsis else
+                  "core axes: " + ", ".join(core) if core else "pointwise / no core sample axes")
         caption = card(f"MODEL {index + 1:02d}", type(model).__name__, detail, "#7C3AED")
         lines.append(f'  m{index} [label={caption}, fillcolor="#F5F3FF", color="#C4B5FD"];')
     for index, derivative in enumerate(derivatives.requests):

@@ -21,10 +21,18 @@ class Signature:
     (point,) passes the full point axis, for example for attention or integration.
     Core axes may also appear in outputs, for example for a graph network that
     predicts at its input points. Reusing a name preserves sample identity and
-    length, NOT independence: consuming a whole axis can mix its samples.
+    length AND sample independence along that axis. A function mixing samples
+    must rename that output axis. This is the author's promise, not something
+    the engine can prove by inspecting arbitrary evaluate implementations.
     Rename an output axis when its sample identity, ordering, or length changes.
     AD compatibility belongs to the requested derivative path, not this class.
     Additional runtime batch axes are not included in this signature.
+
+    "..." is a wildcard axis group. A signature containing it passes the
+    original Value mapping to evaluate, once, without automatic batching or
+    permutation. evaluate returns Values with explicit axes. Wildcard outputs
+    retain the captured axes; omitting the wildcard reduces those axes away.
+    Concrete-only inputs in this mode must already have exactly those axes.
 
     This structured representation is an initial notation for the skeleton.
     Text parsing is not implemented. Model.forward uses the structured
@@ -54,6 +62,29 @@ class Signature:
             # change the model's signature.
             # A plain copied dict also lets torch.compile trace Quantity keys.
             object.__setattr__(self, side, declarations)
+
+        if any("..." in axes for axes in self.outputs.values()) and not any(
+            "..." in axes for axes in self.inputs.values()
+        ):
+            raise ValueError("An output wildcard requires an input wildcard")
+
+    @property
+    def has_ellipsis(self) -> bool:
+        return any("..." in axes for side in (self.inputs, self.outputs) for axes in side.values())
+
+    def wildcard_axes(self, values: Mapping[Quantity, Value]) -> tuple[str, ...]:
+        """Resolve the shared wildcard group from actual input layouts.
+
+        Explicit axis names anywhere in the signature are not part of the
+        wildcard group. Inputs may share a subset of captured axes, like named
+        broadcasting. First input occurrence determines the output group order.
+        """
+        explicit = {a for side in (self.inputs, self.outputs)
+                    for axes in side.values() for a in axes if a != "..."}
+        return tuple(dict.fromkeys(
+            a for q, pattern in self.inputs.items() if "..." in pattern
+            for a in values[q].axes if a not in explicit
+        ))
 
     @classmethod
     def from_string(cls, text: str) -> Signature:
@@ -113,8 +144,8 @@ class Model(nn.Module, ABC):
 
     @abstractmethod
     def evaluate(
-        self, values: Mapping[Quantity, torch.Tensor | list[torch.Tensor]]
-    ) -> dict[Quantity, torch.Tensor | list[torch.Tensor]]:
+        self, values: Mapping[Quantity, torch.Tensor | list[torch.Tensor] | Value]
+    ) -> dict[Quantity, torch.Tensor | list[torch.Tensor] | Value]:
         """Evaluate one call according to signature using the subclass algorithm.
 
         For a pointwise call, each Quantity value has only its intrinsic shape.
@@ -122,6 +153,8 @@ class Model(nn.Module, ABC):
         A full list axis must be first in that input's core signature. evaluate
         then receives a list of Tensors, without Value wrappers. A returned list
         likewise represents the first declared output core axis.
+        If any signature entry contains "...", receive the original Values and
+        return Values; no automatic batching or axis permutation is performed.
         Returned Quantity keys must match outputs.
         """
         raise NotImplementedError
@@ -143,6 +176,9 @@ class Model(nn.Module, ABC):
             if quantity.shape != declarations[quantity].shape:
                 raise ValueError(f"Conflicting shapes for {quantity.name!r}")
             _check_value(quantity, value, sizes)
+
+        if signature.has_ellipsis:
+            return self._evaluate_ellipsis(values, sizes)
 
         batch = _batch_axes(signature, {q: value.axes for q, value in values.items()})
         list_axes = {v.axes[0] for v in values.values() if isinstance(v.tensor, list)}
@@ -241,3 +277,36 @@ class Model(nn.Module, ABC):
                 output_axes[quantity] = value.axes
                 collected.setdefault(quantity, []).append(value.tensor)
         return {q: Value(tensors, (axis,) + output_axes[q]) for q, tensors in collected.items()}
+
+
+    def _evaluate_ellipsis(self, values, sizes) -> dict[Quantity, Value]:
+        """Pass original named Values to a model that owns its batching.
+
+        Wildcards capture runtime axis names, not Tensor dimensions or intrinsic
+        component dimensions. Their absence in an output declares a reduction.
+        """
+        signature = self.signature
+        captured = signature.wildcard_axes(values)
+
+        def expand(pattern, available):
+            group = tuple(axis for axis in available if axis in captured)
+            return tuple(a for token in pattern for a in (group if token == "..." else (token,)))
+
+        for quantity, pattern in signature.inputs.items():
+            # Validate layout instead of silently permuting an object promised
+            # to be passed untouched. The function can read Value.axes itself.
+            actual = values[quantity].axes
+            if actual != expand(pattern, actual):
+                raise ValueError(f"Input axes for {quantity.name!r} do not match wildcard signature")
+        result = self.evaluate(values)
+        if set(result) != set(signature.outputs):
+            raise ValueError("Model returned quantities different from its signature")
+        declarations = {q: q for q in signature.outputs}
+        for quantity, value in result.items():
+            if quantity.shape != declarations[quantity].shape:
+                raise ValueError(f"Conflicting shapes for {quantity.name!r}")
+            _check_value(quantity, value, sizes)
+            expected = expand(signature.outputs[quantity], captured)
+            if value.axes != expected:
+                raise ValueError(f"Output axes for {quantity.name!r} do not match wildcard signature")
+        return result

@@ -66,7 +66,7 @@ def test_retained_case_list_vmaps_common_scenarios_and_shares_constant_mesh():
 
     model = Function({x: ("case", "point"), cells: ("case", "cell"),
                       weight: "case"},
-                     {score: (), centered: ("case", "point")}, evaluate)
+                     {score: (), centered: ("case", "centered_point")}, evaluate)
     clouds = [torch.randn(3, 2, requires_grad=True), torch.randn(5, 2, requires_grad=True)]
     weights = torch.tensor([[1., 2.], [3., 4.]])
     result = model({x: Value(clouds, ("case", "point", "scenario")),
@@ -76,7 +76,7 @@ def test_retained_case_list_vmaps_common_scenarios_and_shares_constant_mesh():
     expected = sum(t.mean(0) * weights[:, i] for i, t in enumerate(clouds))
     torch.testing.assert_close(result[score].tensor, expected)
     assert result[score].axes == ("scenario",)
-    assert result[centered].axes == ("case", "scenario", "point")
+    assert result[centered].axes == ("case", "scenario", "centered_point")
     for original, actual in zip(clouds, result[centered].tensor):
         torch.testing.assert_close(actual, (original - original.mean(0)).T)
     result[score].tensor.sum().backward()

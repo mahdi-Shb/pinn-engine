@@ -36,7 +36,7 @@ def test_derivative_detects_operand_shape_conflicts():
         Signature({Quantity("x", (3,)): (), gradient: ()}, {Quantity("r"): ()})
 
 
-@pytest.mark.parametrize("output_axis", ["point", "point_normalized"])
+@pytest.mark.parametrize("output_axis", ["point_normalized"])
 def test_coupled_model_preserves_outer_scenarios_and_training_gradients(output_axis):
     x, centered = Quantity("x"), Quantity("centered")
 
@@ -99,7 +99,7 @@ def test_point_coupling_does_not_block_ad_of_an_independent_scenario_parameter()
     scenario = TotalDerivative(temperature, parameter)
 
     class MixPoints(Model):
-        signature = Signature({x: "point", parameter: ()}, {temperature: "point"})
+        signature = Signature({x: "point", parameter: ()}, {temperature: "query"})
 
         def evaluate(self, values):
             return {temperature: values[parameter] * (values[x] - values[x].mean())}
@@ -109,8 +109,10 @@ def test_point_coupling_does_not_block_ad_of_an_independent_scenario_parameter()
         x: Value(torch.arange(6.).reshape(2, 3), ("scenario", "point")),
         parameter: Value(torch.tensor([2., 3.]), "scenario"),
     }
-    with pytest.raises(NotImplementedError, match="non-independent sample axes"):
-        solver(values, outputs=spatial)
+    # A renamed output axis requests the full point-to-query Jacobian.
+    spatial_result = solver(values, outputs=spatial)[spatial]
+    expected = values[parameter].tensor[:, None, None] * (torch.eye(3) - torch.ones(3, 3) / 3)
+    torch.testing.assert_close(spatial_result.tensor, expected)
     result = solver(values, outputs=scenario)[scenario]
     torch.testing.assert_close(result.tensor, values[x].tensor - values[x].tensor.mean(dim=1, keepdim=True))
 

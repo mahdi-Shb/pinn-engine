@@ -48,6 +48,8 @@ class Value:
 
     def __post_init__(self) -> None:
         axes = _axes(self.axes)
+        if "..." in axes:
+            raise ValueError("Value.axes must contain actual names; ... is reserved for Signature")
         if isinstance(self.tensor, list):
             if not self.tensor or not axes:
                 raise ValueError("A Tensor list requires members and an outer sample axis")

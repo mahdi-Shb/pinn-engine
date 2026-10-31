@@ -151,7 +151,6 @@ def test_custom_backend_is_not_forced_to_use_autograd_rules_or_a_tape():
     torch.testing.assert_close(result.tensor, 2 * points)
     assert not points.requires_grad and not result.tensor.requires_grad
     assert "analytic-square" in solver.to_dot()
-    # The AD backend conservatively rejects a shared full-point axis. The
-    # custom method has its own known formula and must not inherit that rule.
-    with pytest.raises(NotImplementedError, match="non-independent sample axes"):
-        Solver([Square()], outputs=request)({x: Value(points, "point")})
+    # Preserved point names now promise independence, even for a full core axis.
+    ordinary = Solver([Square()], outputs=request)({x: Value(points, "point")})[request]
+    torch.testing.assert_close(ordinary.tensor, result.tensor)

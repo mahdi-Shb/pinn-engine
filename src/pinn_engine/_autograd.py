@@ -35,9 +35,9 @@ def _validate_alignment(graph, request, values):
         if node is None:
             return False, set()
         if node == graph.producer_node(request.wrt) and node[0] == "model":
-            # Sibling outputs may depend on each other inside evaluate. Treat
-            # its full core axes conservatively; the tensor graph decides AD.
-            return True, {a for axes in graph.models[node[1]].signature.inputs.values() for a in axes}
+            # Shared output-axis names promise independence, including siblings.
+            # Renamed or reduced axes lose that guarantee.
+            return True, set(values[request.wrt].axes) - set(values[quantity].axes)
         active, mixed = False, set()
         for incoming in graph.dependencies[node]:
             depends, consumed = dependence(incoming)
@@ -45,7 +45,10 @@ def _validate_alignment(graph, request, values):
                 active = True
                 mixed.update(consumed)
                 if node[0] == "model":
-                    mixed.update(graph.models[node[1]].signature.inputs[incoming])
+                    # Preserved names promise independence regardless of whether
+                    # evaluate saw a full core axis, a list, or a wildcard group.
+                    # Never forget a reduction if a later node broadcasts it back.
+                    mixed.update(set(values[incoming].axes) - set(values[quantity].axes))
         memo[quantity] = active, mixed
         return active, mixed
 
