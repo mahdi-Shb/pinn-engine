@@ -1,4 +1,4 @@
-from models.registry import ModelRegistry
+from ..registry import ModelRegistry
 
 from .model import DeepNURBS, DeepNURBSConfig
 

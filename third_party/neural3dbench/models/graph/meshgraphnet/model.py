@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
+
+from pinn_engine.quantities import Quantity
 
 import torch
 
-from models.configs import BaseModelConfig
-from models.types import ModelInput, ModelOutput
+from ...configs import BaseModelConfig
+from ...types import ModelInput, ModelOutput
 
 from ..base import BaseGraphNetwork
 from .decoder import MeshGraphNetDecoder
@@ -76,8 +79,14 @@ class MeshGraphNet(BaseGraphNetwork):
 
     config_class = MeshGraphNetConfig
 
-    def __init__(self, config: MeshGraphNetConfig | None = None) -> None:
-        super().__init__(config=config or MeshGraphNetConfig())
+    def __init__(
+        self,
+        config: MeshGraphNetConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ) -> None:
+        super().__init__(config=config or MeshGraphNetConfig(), inputs=inputs, outputs=outputs)
         common = {
             "mlp_hidden_dim": self.config.mlp_hidden_dim,
             "mlp_layers": self.config.mlp_layers,
@@ -140,8 +149,7 @@ class MeshGraphNet(BaseGraphNetwork):
             raise TypeError("edge_index must use an integer dtype.")
         return True
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
         parameter = next(self.parameters())
         node_features = self._ensure_tensor(
             inputs.node_features, name="node_features"

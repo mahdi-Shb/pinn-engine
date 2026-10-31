@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
+
+from pinn_engine.quantities import Quantity
 
 import torch
 from torch import nn
 
-from models.base import BaseNetwork
-from models.configs import BaseModelConfig
-from models.types import ModelCapabilities, ModelInput, ModelOutput
+from ..base import BaseNetwork
+from ..configs import BaseModelConfig
+from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .block import TransolverBlock
 from .components import InputEmbedding, OutputHead
@@ -54,8 +57,14 @@ class Transolver(BaseNetwork):
 
     config_class = TransolverConfig
 
-    def __init__(self, config: TransolverConfig | None = None) -> None:
-        super().__init__(config=config or TransolverConfig())
+    def __init__(
+        self,
+        config: TransolverConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ) -> None:
+        super().__init__(config=config or TransolverConfig(), inputs=inputs, outputs=outputs)
         self.input_embedding = InputEmbedding(
             self.config.spatial_dim,
             self.config.input_dim,
@@ -136,8 +145,7 @@ class Transolver(BaseNetwork):
                 raise ValueError("Every sample must contain at least one valid point.")
         return True
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
         parameter = next(self.parameters())
         coordinates = torch.as_tensor(
             inputs.coordinates, device=parameter.device, dtype=parameter.dtype

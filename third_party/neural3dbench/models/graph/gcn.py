@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
+
+from pinn_engine.quantities import Quantity
 
 import torch
 from torch import nn
 
-from models.configs import BaseModelConfig
-from models.types import ModelInput, ModelOutput
+from ..configs import BaseModelConfig
+from ..types import ModelInput, ModelOutput
 
 from .base import BaseGraphNetwork
 from .layers import GCNBlock
@@ -53,8 +56,14 @@ class GCNConfig(BaseModelConfig):
 class GCN(BaseGraphNetwork):
     config_class = GCNConfig
 
-    def __init__(self, config: GCNConfig | None = None):
-        super().__init__(config=config or GCNConfig())
+    def __init__(
+        self,
+        config: GCNConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ):
+        super().__init__(config=config or GCNConfig(), inputs=inputs, outputs=outputs)
 
         self.input_proj = nn.Linear(self.config.input_dim, self.config.hidden_dim)
 
@@ -105,8 +114,7 @@ class GCN(BaseGraphNetwork):
 
         return edge_index
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
 
         node_features = self._ensure_tensor(inputs.node_features, name="node_features").to(self.input_proj.weight.device)
         edge_index = self._prepare_edge_index(inputs.edge_index, node_features.size(0))

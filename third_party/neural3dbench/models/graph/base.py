@@ -4,8 +4,8 @@ from abc import ABC
 
 import torch
 
-from models.base import BaseNetwork
-from models.types import ModelCapabilities
+from ..base import BaseNetwork
+from ..types import ModelCapabilities
 
 
 class BaseGraphNetwork(BaseNetwork, ABC):

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
+
+from pinn_engine.quantities import Quantity
 
 import torch
 from torch import nn
 
-from models.configs import BaseModelConfig
-from models.types import ModelInput, ModelOutput
+from ..configs import BaseModelConfig
+from ..types import ModelInput, ModelOutput
 
 from .base import BaseGraphNetwork
 from .layers import GATBlock
@@ -84,8 +87,14 @@ class GAT(BaseGraphNetwork):
 
     config_class = GATConfig
 
-    def __init__(self, config: GATConfig | None = None):
-        super().__init__(config=config or GATConfig())
+    def __init__(
+        self,
+        config: GATConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ):
+        super().__init__(config=config or GATConfig(), inputs=inputs, outputs=outputs)
         self.input_proj = nn.Linear(self.config.input_dim, self.config.hidden_dim)
         self.layers = nn.ModuleList(
             GATBlock(
@@ -139,8 +148,7 @@ class GAT(BaseGraphNetwork):
         self_loops = torch.stack((nodes, nodes), dim=0)
         return torch.cat((non_loop_edges, self_loops), dim=1)
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
         node_features = self._ensure_tensor(inputs.node_features, name="node_features").to(
             device=self.input_proj.weight.device,
             dtype=self.input_proj.weight.dtype,

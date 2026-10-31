@@ -1,23 +1,58 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Mapping
 
 import torch
-from torch import nn
+
+from pinn_engine.model import Model, Signature
+from pinn_engine.quantities import Quantity
+from pinn_engine.values import Value
 
 from .configs import BaseModelConfig
 from .types import ModelCapabilities, ModelInput, ModelOutput
 
 
-class BaseNetwork(nn.Module, ABC):
-    """Stable interface every model must satisfy."""
+class BaseNetwork(Model, ABC):
+    """Native named-quantity model with the original numeric prediction API."""
 
     config_class = BaseModelConfig
+    # Dropout draws independently for automatically mapped batch members.
+    vmap_randomness = "different"
 
-    def __init__(self, config: BaseModelConfig | None = None):
+    def __init__(
+        self,
+        config: BaseModelConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ):
         super().__init__()
         self.config = config or self.config_class()
+        from pinn_engine._neural_contract import initialize_contract
+
+        initialize_contract(self, inputs, outputs)
+
+    @property
+    def signature(self) -> Signature:
+        """Derive axes and independence from the actual network modules."""
+        from pinn_engine._neural_contract import contract_signature
+
+        return contract_signature(self)
+
+    def evaluate(
+        self, values: Mapping[Quantity, torch.Tensor | list[torch.Tensor] | Value]
+    ) -> dict[Quantity, torch.Tensor | list[torch.Tensor] | Value]:
+        from pinn_engine._neural_contract import evaluate_contract
+
+        return evaluate_contract(self, values)
+
+    def forward(self, values: Mapping[Quantity, Value]) -> dict[Quantity, Value]:
+        """Validate tensor data before entering automatic vectorization."""
+        from pinn_engine._neural_contract import validate_contract
+
+        validate_contract(self, values)
+        return super().forward(values)
 
     @property
     @abstractmethod
@@ -62,11 +97,13 @@ class BaseNetwork(nn.Module, ABC):
         return True
 
     @abstractmethod
-    def forward(self, inputs: ModelInput) -> ModelOutput:
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
         raise NotImplementedError
 
     def predict(self, inputs: ModelInput) -> ModelOutput:
-        return self(inputs)
+        """Run the numeric API, retaining auxiliary and structured outputs."""
+        self.validate_inputs(inputs)
+        return self._predict(inputs)
 
     @staticmethod
     def _ensure_tensor(value: Any, *, name: str = "tensor") -> torch.Tensor:

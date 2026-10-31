@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Mapping
+
+from pinn_engine.quantities import Quantity
 
 import torch
 from torch import nn
 
-from models.base import BaseNetwork
-from models.configs import BaseModelConfig
-from models.types import ModelCapabilities, ModelInput, ModelOutput
+from ..base import BaseNetwork
+from ..configs import BaseModelConfig
+from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .layers import SineLayer
 
@@ -49,8 +52,14 @@ class SIREN(BaseNetwork):
 
     config_class = SIRENConfig
 
-    def __init__(self, config: SIRENConfig | None = None) -> None:
-        super().__init__(config=config or SIRENConfig())
+    def __init__(
+        self,
+        config: SIRENConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ) -> None:
+        super().__init__(config=config or SIRENConfig(), inputs=inputs, outputs=outputs)
         total_input_dim = self.config.spatial_dim + self.config.input_dim
         self.first_layer = SineLayer(
             total_input_dim,
@@ -132,8 +141,7 @@ class SIREN(BaseNetwork):
                 raise ValueError("Every sample must contain at least one valid point.")
         return True
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
         parameter = next(self.parameters())
         coordinates = torch.as_tensor(
             inputs.coordinates, device=parameter.device, dtype=parameter.dtype

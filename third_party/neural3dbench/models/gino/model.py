@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
+
+from pinn_engine.quantities import Quantity
 from numbers import Integral
 from typing import Sequence
 
 import torch
 from torch import nn
 
-from models.base import BaseNetwork
-from models.configs import BaseModelConfig
-from models.fno.components import FourierOperatorBlock3d, get_activation
-from models.types import ModelCapabilities, ModelInput, ModelOutput
+from ..base import BaseNetwork
+from ..configs import BaseModelConfig
+from ..fno.components import FourierOperatorBlock3d, get_activation
+from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .components import KernelIntegralTransform
 
@@ -94,8 +97,14 @@ class GINO(BaseNetwork):
 
     config_class = GINOConfig
 
-    def __init__(self, config: GINOConfig | None = None) -> None:
-        super().__init__(config=config or GINOConfig())
+    def __init__(
+        self,
+        config: GINOConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ) -> None:
+        super().__init__(config=config or GINOConfig(), inputs=inputs, outputs=outputs)
         self.encoder = KernelIntegralTransform(
             self.config.input_dim,
             self.config.width,
@@ -204,8 +213,7 @@ class GINO(BaseNetwork):
         grid = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1)
         return grid.reshape(-1, 3)
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput, *, use_checkpoint: bool = False) -> ModelOutput:
         parameter = next(self.parameters())
         coordinates = torch.as_tensor(
             inputs.coordinates, device=parameter.device, dtype=parameter.dtype
@@ -228,9 +236,11 @@ class GINO(BaseNetwork):
         for batch_index in range(coordinates.shape[0]):
             valid = source_mask[batch_index]
             latent = self.encoder(
-                coordinates[batch_index, valid],
+                coordinates[batch_index],
                 latent_coordinates,
-                features[batch_index, valid],
+                features[batch_index],
+                source_mask=valid,
+                use_checkpoint=use_checkpoint,
             )
             latent = latent.reshape(*self.config.latent_resolution, self.config.width)
             latent_batches.append(latent.permute(3, 0, 1, 2))
@@ -247,19 +257,18 @@ class GINO(BaseNetwork):
         decoded_batches = []
         for batch_index in range(coordinates.shape[0]):
             query_mask = source_mask[batch_index] if default_queries else None
-            valid_queries = queries[batch_index] if query_mask is None else queries[batch_index, query_mask]
+            valid_queries = queries[batch_index]
+            if query_mask is not None:
+                valid_queries = torch.where(query_mask.unsqueeze(-1), valid_queries, 0.0)
             decoded = self.decoder(
                 latent_coordinates,
                 valid_queries,
                 flat_latent[batch_index],
+                use_checkpoint=use_checkpoint,
             )
             projected = self.output_projection(decoded)
             if query_mask is not None:
-                batch_predictions = projected.new_zeros(
-                    (queries.shape[1], self.config.output_dim)
-                )
-                batch_predictions[query_mask] = projected
-                decoded_batches.append(batch_predictions)
+                decoded_batches.append(projected.masked_fill(~query_mask.unsqueeze(-1), 0.0))
             else:
                 decoded_batches.append(projected)
 
@@ -274,3 +283,8 @@ class GINO(BaseNetwork):
                 "latent_resolution": self.config.latent_resolution,
             },
         )
+
+    def predict(self, inputs: ModelInput) -> ModelOutput:
+        """Retain bounded-memory checkpointing outside functional transforms."""
+        self.validate_inputs(inputs)
+        return self._predict(inputs, use_checkpoint=True)

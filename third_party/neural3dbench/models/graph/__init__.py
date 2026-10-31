@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from models.registry import ModelRegistry
+from ..registry import ModelRegistry
 
 from .base import BaseGraphNetwork
 from .gat import GAT, GATConfig

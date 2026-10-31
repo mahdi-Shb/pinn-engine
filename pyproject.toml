@@ -15,9 +15,20 @@ dev = ["pytest>=7"]
 notebook = ["matplotlib>=3.6", "ipython>=8", "jupyterlab>=4"]
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+license-files = ["LICENSE", "third_party/neural3dbench/LICENSE"]
 py-modules = ["contracts"]
-packages = ["pinn_engine"]
+packages = [
+  "pinn_engine", "pinn_engine.neural3dbench",
+  "pinn_engine.neural3dbench.deep_nurbs", "pinn_engine.neural3dbench.fno",
+  "pinn_engine.neural3dbench.gino", "pinn_engine.neural3dbench.graph",
+  "pinn_engine.neural3dbench.graph.meshgraphnet", "pinn_engine.neural3dbench.pointnet",
+  "pinn_engine.neural3dbench.pointnet2", "pinn_engine.neural3dbench.siren",
+  "pinn_engine.neural3dbench.transolver", "pinn_engine.neural3dbench.unet3d",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+"pinn_engine.neural3dbench" = "third_party/neural3dbench/models"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

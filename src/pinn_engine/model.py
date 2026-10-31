@@ -271,7 +271,10 @@ class Model(nn.Module, ABC):
             for argument, actual in zip(arguments, layouts):
                 dim = 0 if axis in actual else None
                 in_dims.append([dim] * len(argument) if isinstance(argument, list) else dim)
-            mapped = torch.func.vmap(mapped, in_dims=tuple(in_dims), out_dims=0)
+            mapped = torch.func.vmap(
+                mapped, in_dims=tuple(in_dims), out_dims=0,
+                randomness=getattr(self, "vmap_randomness", "error"),
+            )
 
         outputs = {}
         for quantity, tensor in zip(signature.outputs, mapped(*arguments)):

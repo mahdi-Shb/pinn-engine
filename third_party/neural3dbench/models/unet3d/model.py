@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
+
+from pinn_engine.quantities import Quantity
 
 import torch
 from torch import nn
 
-from models.base import BaseNetwork
-from models.configs import BaseModelConfig
-from models.types import ModelCapabilities, ModelInput, ModelOutput
+from ..base import BaseNetwork
+from ..configs import BaseModelConfig
+from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .components import DecoderBlock3D, EncoderBlock3D, VolumetricOutputHead
 
@@ -60,8 +63,14 @@ class UNet3D(BaseNetwork):
 
     config_class = UNet3DConfig
 
-    def __init__(self, config: UNet3DConfig | None = None):
-        super().__init__(config=config or UNet3DConfig())
+    def __init__(
+        self,
+        config: UNet3DConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ):
+        super().__init__(config=config or UNet3DConfig(), inputs=inputs, outputs=outputs)
         channels = [
             self.config.base_channels * self.config.channel_multiplier**level
             for level in range(self.config.levels)
@@ -135,8 +144,7 @@ class UNet3D(BaseNetwork):
             )
         return True
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
         parameter = next(self.parameters())
         hidden = torch.as_tensor(
             inputs.voxel_fields, device=parameter.device, dtype=parameter.dtype

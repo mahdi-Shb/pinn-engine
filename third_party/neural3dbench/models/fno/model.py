@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
+
+from pinn_engine.quantities import Quantity
 from typing import Sequence
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-from models.base import BaseNetwork
-from models.configs import BaseModelConfig
-from models.types import ModelCapabilities, ModelInput, ModelOutput
+from ..base import BaseNetwork
+from ..configs import BaseModelConfig
+from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .components import (
     FourierOperatorBlock3d,
@@ -77,8 +80,14 @@ class FNO3D(BaseNetwork):
 
     config_class = FNO3DConfig
 
-    def __init__(self, config: FNO3DConfig | None = None) -> None:
-        super().__init__(config=config or FNO3DConfig())
+    def __init__(
+        self,
+        config: FNO3DConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ) -> None:
+        super().__init__(config=config or FNO3DConfig(), inputs=inputs, outputs=outputs)
         lifted_channels = self.config.input_channels + (
             3 if self.config.append_coordinates else 0
         )
@@ -134,8 +143,7 @@ class FNO3D(BaseNetwork):
         self.blocks[0].spectral._validate_spatial_shape(volume.shape[-3:])
         return True
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
         parameter = next(self.parameters())
         x = torch.as_tensor(
             inputs.voxel_fields, device=parameter.device, dtype=parameter.dtype

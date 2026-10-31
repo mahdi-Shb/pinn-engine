@@ -43,22 +43,21 @@ def farthest_point_sample(
             (batch_size, point_count), dtype=torch.bool, device=points.device
         )
     valid_counts = mask.sum(dim=1)
-    if torch.any(valid_counts == 0):
-        raise ValueError("Every point cloud must contain at least one valid point.")
+    # The public model entry validates nonempty masks before vmap starts.
 
     centroid = (points * mask.unsqueeze(-1)).sum(dim=1) / valid_counts.unsqueeze(-1)
     initial_distance = (points - centroid.unsqueeze(1)).square().sum(dim=-1)
     farthest = initial_distance.masked_fill(~mask, -1.0).argmax(dim=1)
 
-    indices = torch.empty(
-        (batch_size, sample_count), dtype=torch.long, device=points.device
-    )
+    indices = []
     minimum_distance = torch.full(
         (batch_size, point_count), float("inf"), device=points.device
     )
     batch_indices = torch.arange(batch_size, device=points.device)
     for sample_index in range(sample_count):
-        indices[:, sample_index] = farthest
+        # Stack tensor results rather than copying mapped data into an
+        # unbatched allocation, which is not supported by torch.func.vmap.
+        indices.append(farthest)
         selected = points[batch_indices, farthest]
         distance = (points - selected.unsqueeze(1)).square().sum(dim=-1)
         minimum_distance = torch.minimum(minimum_distance, distance)
@@ -68,7 +67,7 @@ def farthest_point_sample(
         torch.arange(sample_count, device=points.device).unsqueeze(0)
         < valid_counts.unsqueeze(1).clamp_max(sample_count)
     )
-    return indices, sampled_mask
+    return torch.stack(indices, dim=1), sampled_mask
 
 
 def query_ball_point(
@@ -239,7 +238,7 @@ class FeaturePropagation(nn.Module):
         normalization: str = "batch",
     ):
         super().__init__()
-        from models.pointnet.components import SharedPointMLP
+        from ..pointnet.components import SharedPointMLP
 
         self.mlp = SharedPointMLP(
             (input_channels, *mlp_channels), normalization=normalization

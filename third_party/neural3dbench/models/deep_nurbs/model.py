@@ -4,12 +4,14 @@ from dataclasses import dataclass, field
 from numbers import Integral
 from typing import Any, Mapping, Sequence
 
+from pinn_engine.quantities import Quantity
+
 import torch
 from torch import nn
 
-from models.base import BaseNetwork
-from models.configs import BaseModelConfig
-from models.types import ModelCapabilities, ModelInput, ModelOutput
+from ..base import BaseNetwork
+from ..configs import BaseModelConfig
+from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 
 def _positive_int(value: int, name: str) -> int:
@@ -224,10 +226,10 @@ def _bspline_basis(
 
     basis = basis[..., :control_count]
     at_right_endpoint = values == knots[-degree - 1]
-    if torch.any(at_right_endpoint):
-        endpoint_basis = torch.zeros_like(basis)
-        endpoint_basis[..., -1] = 1.0
-        basis = torch.where(at_right_endpoint.unsqueeze(-1), endpoint_basis, basis)
+    # Tensor selection also supports mapped inputs at the right endpoint.
+    endpoint_basis = torch.zeros_like(basis)
+    endpoint_basis[..., -1] = 1.0
+    basis = torch.where(at_right_endpoint.unsqueeze(-1), endpoint_basis, basis)
     return basis
 
 
@@ -236,8 +238,14 @@ class DeepNURBS(BaseNetwork):
 
     config_class = DeepNURBSConfig
 
-    def __init__(self, config: DeepNURBSConfig | None = None) -> None:
-        super().__init__(config=config or DeepNURBSConfig())
+    def __init__(
+        self,
+        config: DeepNURBSConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ) -> None:
+        super().__init__(config=config or DeepNURBSConfig(), inputs=inputs, outputs=outputs)
         control_points = torch.tensor(self.config.control_points, dtype=torch.float32)
         weights = torch.tensor(self.config.weights, dtype=torch.float32)
         admissible = torch.tensor(
@@ -323,8 +331,7 @@ class DeepNURBS(BaseNetwork):
         )
         return physical_coordinates, admissible_field, lifting_field
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
         parameter = next(self.parameters())
         parametric_coordinates = torch.as_tensor(
             inputs.coordinates, device=parameter.device, dtype=parameter.dtype

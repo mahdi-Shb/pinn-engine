@@ -1,4 +1,4 @@
-from models.registry import ModelRegistry
+from ..registry import ModelRegistry
 
 from .components import FourierOperatorBlock3d, ProjectionHead3d, normalized_coordinate_grid
 from .model import FNO3D, FNO3DConfig

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
+
+from pinn_engine.quantities import Quantity
 
 import torch
 
-from models.base import BaseNetwork
-from models.configs import BaseModelConfig
-from models.pointnet.components import PointNetClassificationHead
-from models.types import ModelCapabilities, ModelInput, ModelOutput
+from ..base import BaseNetwork
+from ..configs import BaseModelConfig
+from ..pointnet.components import PointNetClassificationHead
+from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .components import PointNet2Encoder, PointNet2SegmentationHead
 
@@ -81,8 +84,14 @@ class PointNet2(BaseNetwork):
 
     config_class = PointNet2Config
 
-    def __init__(self, config: PointNet2Config | None = None):
-        super().__init__(config=config or PointNet2Config())
+    def __init__(
+        self,
+        config: PointNet2Config | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+    ):
+        super().__init__(config=config or PointNet2Config(), inputs=inputs, outputs=outputs)
         self.encoder = PointNet2Encoder(
             self.config.feature_dim,
             self.config.sample_counts,
@@ -165,8 +174,7 @@ class PointNet2(BaseNetwork):
                 raise ValueError("Every point cloud must contain at least one valid point.")
         return True
 
-    def forward(self, inputs: ModelInput) -> ModelOutput:
-        self.validate_inputs(inputs)
+    def _predict(self, inputs: ModelInput) -> ModelOutput:
         parameter = next(self.parameters())
         points = torch.as_tensor(
             inputs.coordinates, device=parameter.device, dtype=parameter.dtype

@@ -1,4 +1,4 @@
-from models.registry import ModelRegistry
+from ..registry import ModelRegistry
 
 from .layers import SineLayer
 from .model import SIREN, SIRENConfig

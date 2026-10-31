@@ -1,4 +1,4 @@
-from models.registry import ModelRegistry
+from ..registry import ModelRegistry
 
 from .block import TransolverBlock
 from .components import FeedForward, InputEmbedding, OutputHead

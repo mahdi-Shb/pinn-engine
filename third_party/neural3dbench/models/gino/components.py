@@ -35,8 +35,31 @@ class KernelIntegralTransform(nn.Module):
         source_coordinates: torch.Tensor,
         target_coordinates: torch.Tensor,
         source_features: torch.Tensor,
+        source_mask: torch.Tensor | None = None,
+        *,
+        use_checkpoint: bool = True,
     ) -> torch.Tensor:
-        if source_coordinates.shape[0] == 0:
+        """Integrate valid sources without data-dependent Tensor indexing.
+
+        A mask keeps the source shape fixed so independently batched calls can
+        be transformed with ``vmap``. Invalid source coordinates and features
+        may contain padding values, including NaNs, and do not contribute.
+        Callers using functional transforms disable checkpointing explicitly;
+        PyTorch checkpoint's saved-tensor hooks do not support those transforms.
+        """
+        if source_mask is not None:
+            if source_mask.shape != source_coordinates.shape[:1]:
+                raise ValueError("source_mask must have shape [N].")
+            if source_mask.dtype != torch.bool:
+                raise TypeError("source_mask must use a boolean dtype.")
+            source_coordinates = torch.where(
+                source_mask.unsqueeze(-1), source_coordinates, 0.0
+            )
+            source_features = torch.where(
+                source_mask.unsqueeze(-1), source_features, 0.0
+            )
+
+        if source_coordinates.shape[0] == 0 or target_coordinates.shape[0] == 0:
             return source_features.new_zeros(
                 (target_coordinates.shape[0], self.source_projection.out_features)
             )
@@ -55,15 +78,19 @@ class KernelIntegralTransform(nn.Module):
             query = target_coordinates[
                 query_start : query_start + query_chunk_size
             ]
-            integrate = lambda query_chunk, sources, values: self._integrate_query_chunk(
-                query_chunk, sources, values, source_chunk_size
-            )
-            if torch.is_grad_enabled():
+
+            def integrate(query_chunk, sources, values, mask):
+                return self._integrate_query_chunk(
+                    query_chunk, sources, values, source_chunk_size, mask
+                )
+
+            if use_checkpoint and torch.is_grad_enabled():
                 output = checkpoint(
-                    integrate, query, source_coordinates, projected, use_reentrant=False
+                    integrate, query, source_coordinates, projected, source_mask,
+                    use_reentrant=False,
                 )
             else:
-                output = integrate(query, source_coordinates, projected)
+                output = integrate(query, source_coordinates, projected, source_mask)
             outputs.append(output)
 
         return torch.cat(outputs, dim=0)
@@ -74,6 +101,7 @@ class KernelIntegralTransform(nn.Module):
         source_coordinates: torch.Tensor,
         projected: torch.Tensor,
         source_chunk_size: int,
+        source_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         numerator = projected.new_zeros((query.shape[0], projected.shape[-1]))
         denominator = projected.new_zeros((query.shape[0], 1))
@@ -88,6 +116,8 @@ class KernelIntegralTransform(nn.Module):
                 self.kernel(delta.reshape(-1, 3)).reshape_as(distance)
             )
             weights = cutoff * learned_kernel
+            if source_mask is not None:
+                weights = weights * source_mask[source_start:source_end].unsqueeze(0)
             numerator = numerator + weights @ projected[source_start:source_end]
             denominator = denominator + weights.sum(dim=1, keepdim=True)
         return numerator / denominator.clamp_min(1e-8)

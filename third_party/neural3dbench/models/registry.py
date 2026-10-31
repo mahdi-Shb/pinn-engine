@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, get_args, get_origin, Union
+from typing import Any, Mapping, get_args, get_origin, Union
+
+from pinn_engine.quantities import Quantity
 
 from .base import BaseNetwork
 from .configs import BaseModelConfig
@@ -36,7 +38,15 @@ class ModelRegistry:
         return cls._config_types.get(name, BaseModelConfig)
 
     @classmethod
-    def create(cls, name: str, config: dict[str, Any] | BaseModelConfig | None = None, **kwargs: Any) -> BaseNetwork:
+    def create(
+        cls,
+        name: str,
+        config: dict[str, Any] | BaseModelConfig | None = None,
+        *,
+        inputs: Mapping[str, Quantity],
+        outputs: Mapping[str, Quantity],
+        **kwargs: Any,
+    ) -> BaseNetwork:
         model_class = cls.get(name)
         config_type = cls.get_config_class(name)
 
@@ -49,7 +59,7 @@ class ModelRegistry:
         elif config is not None and not isinstance(config, BaseModelConfig):
             raise TypeError("Model config must be a BaseModelConfig or dict.")
 
-        return model_class(config=config)
+        return model_class(config=config, inputs=inputs, outputs=outputs)
 
     @classmethod
     def _infer_config_class(cls, model_class: type[BaseNetwork]) -> type[BaseModelConfig]:

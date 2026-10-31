@@ -152,6 +152,15 @@ See [the derivative contract](docs/contracts.fa.md) for details and limitations.
 
 Geometry/domain interfaces are deferred; the GeoCore and field-domain ideas are
 recorded in [the design notes](docs/architecture_open_decisions.fa.md).
+
+The eleven Neural3DBench networks are native `Model` subclasses under
+`pinn_engine.neural3dbench`, installed with the engine. Their constructors accept
+`inputs={role: quantity}` and `outputs={role: quantity}`. Actual BatchNorm modules
+consume the complete batch; graph networks pack disjoint meshes internally.
+Other networks use the engine's named-axis automatic batching. See
+[network layouts and examples](docs/neural3dbench.fa.md) and the runnable
+[GeoCore-to-mesh-network example](examples/geocore_mesh_network.py).
+
 Sampler implementations, non-AD built-in methods, persistent cache policy, and CUDA stream scheduling remain
 open work. Ordinary Solver fullgraph capture is tested; derivative fullgraph
 capture, Inductor speedups, and GPU concurrency are not claimed.
