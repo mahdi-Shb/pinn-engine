@@ -28,6 +28,8 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
 
 ## Files
 
+- [GeoCore wrapper](docs/geocore.fa.md): sequential CPU generation of design
+  variants as named Tensor lists, with [a runnable example](examples/geocore_design.py).
 - [third_party/](third_party/): imported geometry and network projects for
   incremental adaptation; source versions are recorded there. They are not
   automatically installed or exposed by the engine package.
