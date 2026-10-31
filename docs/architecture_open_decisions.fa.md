@@ -564,14 +564,21 @@ Signature ورودی اختیاری independence از نوع dict[str,bool] می
 
 ## پیاده‌سازی شبکه‌های Neural3DBench — ۲۰۲۶-۱۰-۳۱
 
-هر ۱۱ شبکه مستقیماً از Model ارث می‌برند و constructorهایشان config، inputs و outputs می‌گیرند. سورس عددی همان‌جا در third_party نگه داشته و با نام pinn_engine.neural3dbench نصب می‌شود. پارامترها و نام‌های state_dict حفظ شده‌اند؛ predict(ModelInput) دسترسی به خروجی‌های قبلیِ ساختاریافته/auxiliary/metadata را نگه می‌دارد، ولی forward قرارداد Value موتور را دارد. نگاشت نقش‌ها، تعداد مؤلفه‌ها و حضور ورودی‌های اختیاری هنگام ساخت بررسی می‌شود.
+هر ۱۱ شبکه مستقیماً از Model ارث می‌برند و constructorهایشان config، inputs و outputs می‌گیرند. سورس عددی همان‌جا در third_party نگه داشته و با نام pinn_engine.networks نصب می‌شود. پارامترها و نام‌های state_dict حفظ شده‌اند؛ predict(ModelInput) دسترسی به خروجی‌های قبلیِ ساختاریافته/auxiliary/metadata را نگه می‌دارد، ولی forward قرارداد Value موتور را دارد. نگاشت نقش‌ها، تعداد مؤلفه‌ها و حضور ورودی‌های اختیاری هنگام ساخت بررسی می‌شود.
 
 وجود واقعی BatchNorm در زیرماژول‌ها باعث Signature با پیشوند ... برای تمام ورودی/خروجی‌هاست. کل batch داخل evaluate مدیریت می‌شود؛ اگر BatchNorm از آمار batch استفاده کند independence گروه False و با آمار ثابت eval برابر True است. شبکه‌های GCN/GAT/MeshGraphNet حتی بدون BatchNorm کل batch را می‌گیرند و با offset یال‌ها، گراف‌های جدا از هم را در یک اجرای شبکه پردازش می‌کنند. سایر شبکه‌ها ... ندارند و از vmap/حلقهٔ لیستی موتور استفاده می‌کنند. Dropout روی محورهای mapped مستقل می‌کشد. وابستگی point/spatial/vertex هر شبکه صریح اعلام شده و AD فعلی روی محور مشترکِ وابسته طبق قرارداد خطا می‌دهد؛ آموزش معمولی برقرار است.
 
-لیست‌ها padding نمی‌شوند؛ BatchNorm آمار batch با اندازهٔ متفاوت core خطا می‌دهد تا آمارش بی‌صدا عوض نشود. ماسک ورودیِ خود شبکه آمار BatchNorm را ماسک نمی‌کند. GINO برای vmap از ماسک با طول ثابت استفاده می‌کند و در مسیر Model، activation checkpoint خاموش است؛ در predict روشن باقی می‌ماند. کاهش حافظه و حذف headهای خروجیِ انتخاب‌نشده، compile کامل و سنجش GPU جزو این پیاده‌سازی نیستند. قرارداد domain و بررسی برابر بودن domain ورودی/خروجی مکانی همچنان باید زمان افزودن domain پیاده شود. جزئیات محورهای latent و محدودیت‌ها در [راهنمای شبکه‌ها](neural3dbench.fa.md) آمده است.
+لیست‌ها padding نمی‌شوند؛ BatchNorm آمار batch با اندازهٔ متفاوت core خطا می‌دهد تا آمارش بی‌صدا عوض نشود. ماسک ورودیِ خود شبکه آمار BatchNorm را ماسک نمی‌کند. GINO برای vmap از ماسک با طول ثابت استفاده می‌کند و در مسیر Model، activation checkpoint خاموش است؛ در predict روشن باقی می‌ماند. کاهش حافظه و حذف headهای خروجیِ انتخاب‌نشده، compile کامل و سنجش GPU جزو این پیاده‌سازی نیستند. قرارداد domain و بررسی برابر بودن domain ورودی/خروجی مکانی همچنان باید زمان افزودن domain پیاده شود. جزئیات محورهای latent و محدودیت‌ها در [راهنمای شبکه‌ها](networks.fa.md) آمده است.
 
 ## checkpoint بیرون batching برای GINO — ۲۰۲۶-۱۰-۳۱
 
 خاموش‌بودن checkpoint در مسیر Modelِ GINO در بند قبلی جایگزین شد: Model پس از ساخت تمام vmapهای لازم، کل تابع batch‌شده را با checkpoint(..., use_reentrant=False) اجرا می‌کند. checkpoint داخلی kernel در evaluate همچنان خاموش است تا داخل vmap قرار نگیرد؛ مسیر predict(ModelInput) checkpoint داخلی قبلی را نگه می‌دارد. checkpoint_batches پیش‌فرض Model برابر False و فقط برای GINO برابر True است؛ با False روی instance می‌توان اجرای مرجع گرفت. در no_grad کنار گذاشته می‌شود، در لیست ragged برای هر عضو جدا اجرا می‌شود و مسیر wildcard این گزینه را اعمال نمی‌کند.
 
 تبادل حافظه با محاسبهٔ مجدد اکنون روی کل فراخوانی عددی انجام می‌شود؛ کاهش tensorهای ذخیره‌شده برای backward تست شده ولی benchmark سرعت یا peak حافظهٔ GPU انجام نشده است. replay نباید بی‌قید برای مدل‌هایی با تغییر state مثل آمار BatchNorm فعال شود. تست‌ها شامل batch چندمحوره، ragged و بدون batch، مشتق‌های تا مرتبهٔ سوم، queryهای مستقل در Solver با دو اندازهٔ chunk مشتق و backward از loss شامل مشتق مرتبهٔ سوم هستند؛ خروجی و گرادیان پارامترها با checkpoint خاموش مقایسه می‌شوند.
+
+
+## ساختار یکپارچهٔ src — ۲۰۲۶-۱۰-۳۱
+
+GeoCore به صورت پکیج مستقل به src/geocore منتقل شد و import geocore حفظ شد. شبکه‌های همکاران با نام عمومی‌تر pinn_engine.networks در src/pinn_engine/networks قرار گرفتند و helper قراردادشان از ریشهٔ موتور به networks/_contract.py منتقل شد. نام neural3dbench فقط برای provenance/فایل‌های مرجع باقی می‌ماند؛ import اجرایی قدیمی به pinn_engine.networks تغییر کرده است. اسناد جاری در docs/networks.fa.md هستند.
+
+setuptools اکنون پکیج‌ها را مستقیماً از src پیدا می‌کند و mapping ویژه به third_party حذف شد. یک نصب ریشه هر دو پکیج را ارائه می‌کند؛ dependencyهای عددی geometry اختیاری‌اند و با extra geometry نصب می‌شوند. DLL/dylibهای همراه GeoCore و مجوزها در package data حفظ شده‌اند. فایل‌های مرجع upstream در third_party مانده‌اند و pyprojectهای اولیهٔ آن‌ها مسیر نصب جاری نیستند. checkpoint بیرون vmap در Model و فعال‌بودن آن برای GINO حفظ شده است.

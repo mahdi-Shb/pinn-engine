@@ -1,8 +1,8 @@
 """CPU GeoCore representation generation as an ordinary engine Model.
 
-GeoCore is optional and imported only when constructing this model. Install it
-separately, e.g. pip install -e third_party/geocore. No sys.path modification or
-copy of its algorithms is needed. Outputs stay on CPU for explicit transfer.
+GeoCore lives in src/geocore and is imported only when constructing this model.
+Install its optional dependencies with pip install -e ".[geometry]".
+Outputs stay on CPU for explicit transfer.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ class GeoCoreModel(Model):
         try:
             import geocore as gc
         except ImportError as error:
-            raise ImportError("GeoCoreModel requires GeoCore; install third_party/geocore") from error
+            raise ImportError("GeoCoreModel requires geometry dependencies; install .[geometry]") from error
         from geocore.outputs import representation_name
 
         self.source = source

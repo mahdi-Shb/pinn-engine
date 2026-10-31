@@ -1,4 +1,4 @@
-"""Run after installing the engine and third_party/geocore in this environment."""
+"""Run after installing the engine with the geometry extra."""
 import torch
 import geocore as gc
 from pinn_engine import GeoCoreModel, Model, Quantity, Signature, Solver, Value

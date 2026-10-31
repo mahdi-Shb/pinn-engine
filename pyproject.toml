@@ -12,23 +12,23 @@ dependencies = ["torch>=2.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+geometry = ["numpy>=1.24", "scipy>=1.10", "numba>=0.58"]
+mesh = ["trimesh>=4"]
 notebook = ["matplotlib>=3.6", "ipython>=8", "jupyterlab>=4"]
 
 [tool.setuptools]
-license-files = ["LICENSE", "third_party/neural3dbench/LICENSE"]
+package-dir = {"" = "src"}
+license-files = ["LICENSE", "src/pinn_engine/networks/LICENSE", "src/geocore/_bin/LICENSE"]
 py-modules = ["contracts"]
-packages = [
-  "pinn_engine", "pinn_engine.neural3dbench",
-  "pinn_engine.neural3dbench.deep_nurbs", "pinn_engine.neural3dbench.fno",
-  "pinn_engine.neural3dbench.gino", "pinn_engine.neural3dbench.graph",
-  "pinn_engine.neural3dbench.graph.meshgraphnet", "pinn_engine.neural3dbench.pointnet",
-  "pinn_engine.neural3dbench.pointnet2", "pinn_engine.neural3dbench.siren",
-  "pinn_engine.neural3dbench.transolver", "pinn_engine.neural3dbench.unet3d",
-]
 
-[tool.setuptools.package-dir]
-"" = "src"
-"pinn_engine.neural3dbench" = "third_party/neural3dbench/models"
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pinn_engine*", "geocore*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"pinn_engine.networks" = ["LICENSE"]
+geocore = ["_bin/LICENSE", "_bin/win-x64/*.dll", "_bin/osx-arm64/*.dylib", "_bin/linux-x64/*.so*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

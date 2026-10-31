@@ -1,19 +1,17 @@
-# کدهای همکاران برای تطبیق با موتور
+# منابع و فایل‌های مرجع همکاران
 
-این پوشه سورس دو پروژهٔ همکاران را نگه می‌دارد. شبکه‌های Neural3DBench اکنون مستقیماً Model موتور هستند و در نصب موتور با نام `pinn_engine.neural3dbench` ارائه می‌شوند؛ سورس عددی جابه‌جا یا کپی نشده است. GeoCore همچنان dependency اختیاری با نصب جداگانه است و رپر موتور در `src/pinn_engine/geocore.py` قرار دارد.
+کد اجرایی از این پوشه خارج شده است:
 
-- `geocore/`: محتوای پروژهٔ geometry از آرشیو ارسالی، شامل سورس، مستندات، تست‌ها، مثال‌ها، داده‌های نمونه و کتابخانه‌های native همراه.
-- `neural3dbench/`: فایل‌های ثبت‌شدهٔ ریپوی GitHub، شامل شبکه‌ها، adapterها، تست‌ها، مثال‌ها و نمونه‌خروجی‌ها؛ بدون تاریخچهٔ Git.
-- `sources.json`: آدرس و commit منبع شبکه‌ها و SHA-256 آرشیو geometry برای شناسایی نسخهٔ واردشده.
+- GeoCore: `src/geocore`؛ پکیج مستقل با همان `import geocore`.
+- شبکه‌ها: `src/pinn_engine/networks`؛ استفاده با `from pinn_engine.networks import ...`.
+- قرارداد شبکه‌ها: `src/pinn_engine/networks/_contract.py`؛ رپر GeoCore: `src/pinn_engine/geocore.py`.
 
-فایل‌های cache، محیط مجازی و خروجی build وارد نشده‌اند. مجوزها و اعلان‌های موجود در منابع حفظ شده‌اند؛ LICENSE شبکه‌ها در wheel موتور هم قرار می‌گیرد. commit موجود در sources.json نسخهٔ مبناست و local_changes تغییرات تطبیقی بعد از import را معرفی می‌کند. هیچ تغییری در `sys.path` لازم نیست.
+فایل `sources.json` commit/آرشیو مبنا و مسیر فعلی کدها را ثبت می‌کند. مجوزها حفظ شده‌اند و همراه بسته نصب می‌شوند.
 
-## وضعیت تطبیق فعلی
+پوشه‌های باقی‌ماندهٔ `geocore/` و `neural3dbench/` مستندات، مثال‌ها، تست‌ها، تنظیمات و ابزارهای benchmark اصلی را برای مرجع نگه می‌دارند. pyprojectهای داخل آن‌ها metadata پروژهٔ اولیه‌اند و پس از انتقال سورس، مسیر نصب نیستند. برای نصب کتابخانه از pyproject ریشه استفاده شود:
 
-هر یازده شبکه inputs/outputs صریح، محورهای core و independence دارند؛ BatchNorm کل batch را می‌گیرد، گراف‌ها درون evaluate به صورت disjoint بسته‌بندی می‌شوند و سایر شبکه‌ها batching خودکار دارند. جزئیات، محدودیت‌ها و روش استفاده در [راهنمای شبکه‌ها](../docs/neural3dbench.fa.md) است.
+```powershell
+python -m pip install -e ".[dev,geometry]"
+```
 
-API قدیمی `network(ModelInput)` به `network.predict(ModelInput)` منتقل شده تا auxiliary/metadata حفظ شوند؛ constructor هم inputs/outputs می‌خواهد. مثال‌ها و تست‌های upstream موجود در این snapshot هنوز API قدیمی را نشان می‌دهند. تست قرارداد جدید در `tests/test_neural3dbench.py` موتور است و مثال قابل اجرا در `examples/geocore_mesh_network.py` موتور قرار دارد.
-
-سه محدودیت باقی است: BatchNorm آمار batch با coreهای ragged پذیرفته نیست؛ مختصات GINO باید واقعاً به `[0,1]` برده شوند؛ هندسهٔ DeepNURBS ثابت و در config است. تولید موازی GeoCore، domain و مشتق‌های تخصصی شبکه‌ها برای آینده‌اند.
-
-خود الگوریتم‌های geometry تغییر نکرده‌اند. هم‌ترازی محورها، انتقال channelها و reshape مؤلفه‌ها در helper قرارداد موتور انجام می‌شود، نه با adapter جدا برای هر فراخوانی.
+API قدیمی مثال‌ها و تست‌های upstream ممکن است با قرارداد فعلی Model یکسان نباشد. تست‌های فعال موتور در `tests/`، نمونه‌های قابل اجرای موتور در `examples/` و راهنمای فعلی شبکه‌ها در [راهنمای شبکه‌ها](../docs/networks.fa.md) هستند. سورس عددی، خروجی‌های auxiliary و ابزارهای مرجع حذف نشده‌اند.

@@ -29,27 +29,27 @@ class BaseNetwork(Model, ABC):
     ):
         super().__init__()
         self.config = config or self.config_class()
-        from pinn_engine._neural_contract import initialize_contract
+        from ._contract import initialize_contract
 
         initialize_contract(self, inputs, outputs)
 
     @property
     def signature(self) -> Signature:
         """Derive axes and independence from the actual network modules."""
-        from pinn_engine._neural_contract import contract_signature
+        from ._contract import contract_signature
 
         return contract_signature(self)
 
     def evaluate(
         self, values: Mapping[Quantity, torch.Tensor | list[torch.Tensor] | Value]
     ) -> dict[Quantity, torch.Tensor | list[torch.Tensor] | Value]:
-        from pinn_engine._neural_contract import evaluate_contract
+        from ._contract import evaluate_contract
 
         return evaluate_contract(self, values)
 
     def forward(self, values: Mapping[Quantity, Value]) -> dict[Quantity, Value]:
         """Validate tensor data before entering automatic vectorization."""
-        from pinn_engine._neural_contract import validate_contract
+        from ._contract import validate_contract
 
         validate_contract(self, values)
         return super().forward(values)

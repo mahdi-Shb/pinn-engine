@@ -7,8 +7,8 @@ import torch
 from torch import nn
 
 from pinn_engine import Derivative, GeoCoreModel, Model, Quantity, Signature, Solver, Value
-from pinn_engine import neural3dbench as networks
-from pinn_engine.neural3dbench import ModelInput
+from pinn_engine import networks
+from pinn_engine.networks import ModelInput
 
 
 @pytest.fixture(autouse=True)

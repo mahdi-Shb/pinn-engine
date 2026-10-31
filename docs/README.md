@@ -5,7 +5,7 @@
 - [Signature و گروه محورهای ...](signature.fa.md): دریافت مستقیم Value و قرارداد استقلال محورهای هم‌نام.
 
 - [رپر GeoCore](geocore.fa.md): ساخت ترتیبی سناریوها و خروجی‌های عددی قابل اتصال به Solver.
-- [شبکه‌های Neural3DBench](neural3dbench.fa.md): نگاشت inputs/outputs، محورهای هر شبکه، BatchNorm و بسته‌بندی meshها.
+- [شبکه‌های Neural3DBench](networks.fa.md): نگاشت inputs/outputs، محورهای هر شبکه، BatchNorm و بسته‌بندی meshها.
 - [قرارداد کمیت، مدل، محورها و مشتق](contracts.fa.md): رفتار پیاده‌شده و محدودیت‌های فعلی.
 - [گروه‌بندی درخواست‌های مشتق](derivative_grouping.fa.md): معیارهای reverse، مسیر توسعهٔ forward/Taylor و اشتراک عملگر mesh.
 - [محور بیرونی لیستی](tensor_lists.fa.md): نمایش اندازه‌های متفاوت، اجرای حلقه‌ای و vmap و بررسی سازگاری هنگام اجرا.

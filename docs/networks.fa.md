@@ -5,7 +5,7 @@
 ```python
 import torch
 from pinn_engine import Quantity, Solver, Value
-from pinn_engine.neural3dbench import SIREN, SIRENConfig
+from pinn_engine.networks import SIREN, SIRENConfig
 
 xyz = Quantity("wing_coordinates", (3,))
 stress = Quantity("wing_stress", (3, 3))
@@ -60,6 +60,6 @@ result.tensor.square().mean().backward()
 
 checkpoint نیازمند محاسبهٔ قابل replay است؛ نباید آن را بدون بررسی برای مدل‌های دارای تغییر state مانند آمار BatchNorm فعال کرد. خروجی، گرادیان‌ها و مشتق‌های تا مرتبهٔ سوم GINO، از جمله مشتق‌های query در Solver و آموزش با loss شامل مشتق مرتبهٔ سوم، با مسیر بدون checkpoint تست شده‌اند. پشتیبانی همهٔ ترکیب‌های torch.func یا compile از این تست‌ها نتیجه نمی‌شود.
 
-کد شبکه‌ها در `third_party/neural3dbench/models` نگه داشته شده ولی با نام اختصاصی `pinn_engine.neural3dbench` بسته‌بندی می‌شود؛ نصب پکیج عمومی `models` یا تغییر `sys.path` لازم نیست. مثال‌ها/تست‌های قدیمی upstream که constructor بدون inputs/outputs و فراخوانی مستقیم با ModelInput دارند، API قدیمی را نشان می‌دهند؛ مسیر جدید نمونهٔ بالاست.
+کد شبکه‌ها در `src/pinn_engine/networks` قرار دارد و با نام `pinn_engine.networks` نصب می‌شود؛ نصب پکیج عمومی `models` یا تغییر `sys.path` لازم نیست. مثال‌ها/تست‌های قدیمی upstream که constructor بدون inputs/outputs و فراخوانی مستقیم با ModelInput دارند، API قدیمی را نشان می‌دهند؛ مسیر جدید نمونهٔ بالاست.
 
 تست‌ها روی CPU اجرا شده‌اند. پشتیبانی عملی همهٔ شبکه‌ها از GPU، fullgraph compilation و سرعت بیشتر تضمین نشده است. اعتبارسنجی داده، بسته‌بندی لیست و برخی الگوریتم‌ها حلقه/شرط دارند. افزودن domain و کنترل برابر بودن domain ورودی/خروجی مکانی مطابق یادداشت طراحی هنوز برای آینده است.

@@ -12,9 +12,9 @@ from typing import Mapping
 import torch
 from torch import nn
 
-from .model import Signature
-from .quantities import Quantity
-from .values import Value, _check_value
+from ..model import Signature
+from ..quantities import Quantity
+from ..values import Value, _check_value
 
 
 _GRAPHS = {"gcn", "gat", "meshgraphnet"}
@@ -180,7 +180,7 @@ def _prepared_batches(model, values):
 
 
 def _model_input(model, raw):
-    from .neural3dbench.types import ModelInput
+    from .types import ModelInput
     raw = dict(raw)
     if model.config.name in _GRIDS:
         raw["voxel_fields"] = raw["voxel_fields"].movedim(-1, 1)
@@ -219,7 +219,7 @@ def _outputs(model, result, batch_shape):
 
 
 def _graph_input(model, raw):
-    from .neural3dbench.types import ModelInput
+    from .types import ModelInput
     raw = dict(raw)
     edges = raw["edge_index"]
     if edges.dtype not in (torch.int32, torch.int64):

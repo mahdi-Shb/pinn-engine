@@ -1,15 +1,14 @@
 """Generate two ragged meshes, predict a vertex field, and train its network.
 
 Run after installing the engine and optional geometry dependency:
-    pip install -e .
-    pip install -e third_party/geocore
+    pip install -e ".[geometry]"
     python examples/geocore_mesh_network.py
 """
 
 import torch
 
 from pinn_engine import GeoCoreModel, Quantity, Solver, Value
-from pinn_engine.neural3dbench import MeshGraphNet, MeshGraphNetConfig
+from pinn_engine.networks import MeshGraphNet, MeshGraphNetConfig
 import geocore as gc
 
 

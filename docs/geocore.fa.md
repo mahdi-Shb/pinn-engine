@@ -1,10 +1,9 @@
 # رپر GeoCore
 
-`GeoCoreModel` یک Model موتور است و خود سورس GeoCore را تغییر نمی‌دهد. برای نصب:
+`GeoCoreModel` یک Model موتور است. سورس مستقل GeoCore در `src/geocore` قرار دارد و همچنان با `import geocore` استفاده می‌شود. کد آن همراه موتور نصب می‌شود و dependencyهای عددی با extra اختیاری geometry نصب می‌شوند:
 
 ```powershell
-python -m pip install -e ".[dev]"
-python -m pip install -e third_party/geocore
+python -m pip install -e ".[dev,geometry]"
 python examples/geocore_design.py
 ```
 

@@ -22,7 +22,9 @@ notebook kernel. The src layout intentionally does not inject the checkout into
 sys.path. After editing Python source, an editable install uses the changes
 without reinstalling.
 
-The engine itself only requires PyTorch; `dev` installs the test dependency and
+The engine itself only requires PyTorch. GeoCore is bundled under `src/geocore`;
+install `.[geometry]` for its NumPy/SciPy/Numba dependencies, and `.[mesh]`
+for optional trimesh operations. `dev` installs the test dependency and
 `notebook` installs the interactive tutorial dependencies. Graphviz's system
 `dot` executable is optional: the notebook has a Matplotlib graph fallback.
 
@@ -33,9 +35,13 @@ The engine itself only requires PyTorch; `dev` installs the test dependency and
   handle named Values directly, with no automatic mapping or permutation.
 - [GeoCore wrapper](docs/geocore.fa.md): sequential CPU generation of design
   variants as named Tensor lists, with [a runnable example](examples/geocore_design.py).
-- [third_party/](third_party/): imported geometry and network projects for
-  incremental adaptation; source versions are recorded there. They are not
-  automatically installed or exposed by the engine package.
+- [src/geocore/](src/geocore/): independent geometry package (`import geocore`),
+  including its native runtime libraries.
+- [src/pinn_engine/networks/](src/pinn_engine/networks/): native network Models
+  and their shared input/output contract.
+- [third_party/](third_party/): provenance, original documentation, benchmark
+  utilities, examples, and tests retained as reference; active runtime packages
+  live in `src/`.
 - [src/pinn_engine/](src/pinn_engine/): implementation modules:
   - `quantities.py`: `Quantity` declarations.
   - `values.py`: `Value`, named axes, and runtime shape checks.
@@ -154,11 +160,11 @@ Geometry/domain interfaces are deferred; the GeoCore and field-domain ideas are
 recorded in [the design notes](docs/architecture_open_decisions.fa.md).
 
 The eleven Neural3DBench networks are native `Model` subclasses under
-`pinn_engine.neural3dbench`, installed with the engine. Their constructors accept
+`pinn_engine.networks`, installed with the engine. Their constructors accept
 `inputs={role: quantity}` and `outputs={role: quantity}`. Actual BatchNorm modules
 consume the complete batch; graph networks pack disjoint meshes internally.
 Other networks use the engine's named-axis automatic batching. See
-[network layouts and examples](docs/neural3dbench.fa.md) and the runnable
+[network layouts and examples](docs/networks.fa.md) and the runnable
 [GeoCore-to-mesh-network example](examples/geocore_mesh_network.py).
 
 Sampler implementations, non-AD built-in methods, persistent cache policy, and CUDA stream scheduling remain
