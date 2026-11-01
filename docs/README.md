@@ -11,7 +11,7 @@
 - [محور بیرونی لیستی](tensor_lists.fa.md): نمایش اندازه‌های متفاوت، اجرای حلقه‌ای و vmap و بررسی سازگاری هنگام اجرا.
 
 - [نرمال‌سازی مشترک](normalization.fa.md): BatchNorm روی Tensor/list و mask، و حالت instance در PointNet.
-- [تغییرات نسبت به منبع شبکه‌ها](network_upstream_changes.fa.md): مرز کد همکار و قابلیت‌های جدید موتور.
+- [خلاصهٔ تغییرات شبکه‌ها](network_upstream_changes.fa.md) و [گزارش کامل با diff فعلی](neural3dbench_comparison.fa.md): مرز کد همکار و قابلیت‌های موتور.
 
 ## یادداشت‌های طراحی
 
