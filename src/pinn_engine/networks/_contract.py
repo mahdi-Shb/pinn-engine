@@ -119,6 +119,12 @@ def _prepared_batches(model, values):
     Each returned group has one upstream B dimension. No padding is introduced.
     Missing named batch axes are shared, never matched by numerical size alone.
     """
+    if model.config.name in {"pointnet", "pointnet2"} and batch_norms(model):
+        if any(isinstance(value.tensor, list) for value in values.values()):
+            raise ValueError(
+                f"{type(model).__name__} with BatchNorm requires Tensor inputs; "
+                "list inputs are not supported and are not padded automatically"
+            )
     specs, output_specs, _ = _specs(model)
     core = {a for roles, definitions in ((model.input_quantities, specs), (model.output_quantities, output_specs))
             for role in roles for a in definitions[role][0]}
@@ -261,9 +267,6 @@ def evaluate_contract(model, values):
 
     batch, list_axis, groups = _prepared_batches(model, values)
     shapes = {tuple(t.shape[1:] for t in raw.values()) for _, raw in groups}
-    if len(shapes) > 1 and model.config.name in {"pointnet", "pointnet2"}:
-        from ._point_batches import evaluate_ragged_points
-        return evaluate_ragged_points(model, batch, groups)
     if len(shapes) > 1 and uses_batch_statistics(model):
         raise ValueError("Ragged grid execution requires network-specific handling before BatchNorm")
     if len(shapes) == 1:

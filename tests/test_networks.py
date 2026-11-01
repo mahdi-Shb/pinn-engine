@@ -298,7 +298,7 @@ def test_batchnorm_independence_tracks_training_frozen_stats_and_untracked_eval_
     assert model.signature.dependent_axes(values[features], result, values) == {"case", "vertex"}
 
 
-def test_equal_sized_batchnorm_lists_and_dense_axes_form_one_real_training_batch(monkeypatch):
+def test_batchnorm_multiple_dense_axes_form_one_real_training_batch(monkeypatch):
     xyz, field = Quantity("xyz", (3,)), Quantity("field")
     model = networks.PointNet(configuration("PointNet", normalization="batch"),
                               inputs={"coordinates": xyz}, outputs={"predictions": field}).train()
@@ -310,10 +310,10 @@ def test_equal_sized_batchnorm_lists_and_dense_axes_form_one_real_training_batch
         count[0] += 1
         return original(request)
     monkeypatch.setattr(model, "_predict", counted)
-    actual = model({xyz: Value(members, ("family", "scenario", "point"))})[field]
+    actual = model({xyz: Value(torch.stack(members), ("family", "scenario", "point"))})[field]
     expected = reference.predict(ModelInput(coordinates=torch.cat(members, 0))).predictions[..., 0]
     assert count[0] == 1 and actual.axes == ("family", "scenario", "point")
-    assert isinstance(actual.tensor, list)
+    assert isinstance(actual.tensor, torch.Tensor) and actual.tensor.shape == (2, 3, 6)
     for index in range(2):
         torch.testing.assert_close(actual.tensor[index], expected[index * 3:(index + 1) * 3])
     for module in model.modules():
@@ -336,25 +336,45 @@ def test_non_batchnorm_training_dropout_works_under_nested_vmap():
 
 
 @pytest.mark.parametrize("kind", ("PointNet", "PointNet2"))
-def test_unequal_batchnorm_lists_train_once_and_support_eval(kind):
-    xyz, field = Quantity("xyz", (3,)), Quantity("field")
+@pytest.mark.parametrize("training", (True, False))
+@pytest.mark.parametrize("lengths,list_role", (((5, 5), "coordinates"),
+                                             ((5, 8), "coordinates"),
+                                             ((5, 5), "point_mask")))
+def test_batchnorm_point_lists_are_rejected_without_computation_or_buffer_changes(
+        kind, training, lengths, list_role, monkeypatch):
+    xyz, mask, field = Quantity("xyz", (3,)), Quantity("valid"), Quantity("field")
     model = getattr(networks, kind)(configuration(kind, normalization="batch"),
-                                   inputs={"coordinates": xyz}, outputs={"predictions": field}).train()
-    members = [torch.rand(5, 3), torch.rand(8, 3)]
-    values = {xyz: Value(members, ("case", "point"))}
-    training = model(values)[field]
-    sum(t.square().mean() for t in training.tensor).backward()
-    assert all(torch.isfinite(t).all() for t in training.tensor)
-    assert any(p.grad is not None for p in model.parameters())
-    for module in model.modules():
-        if isinstance(module, nn.modules.batchnorm._BatchNorm):
-            assert module.num_batches_tracked.item() == 1
-    model.eval()
-    actual = model(values)[field]
-    assert actual.axes == ("case", "point") and isinstance(actual.tensor, list)
-    for index, points in enumerate(members):
-        reference = model.predict(ModelInput(coordinates=points.unsqueeze(0))).predictions[0, :, 0]
-        torch.testing.assert_close(actual.tensor[index], reference)
+                                   inputs={"coordinates": xyz, "point_mask": mask},
+                                   outputs={"predictions": field}).train(training)
+    members = [torch.rand(n, 3) for n in lengths]
+    masks = [torch.ones(n, dtype=torch.bool) for n in lengths]
+    points = members if list_role == "coordinates" else torch.stack(members)
+    values = {xyz: Value(points, ("case", "point")), mask: Value(masks, ("case", "point"))}
+    before = {name: buffer.clone() for name, buffer in model.named_buffers()}
+
+    def reject_prediction(*args, **kwargs):
+        pytest.fail("Unsupported lists must be rejected before numeric network execution")
+
+    monkeypatch.setattr(model, "_predict", reject_prediction)
+    with pytest.raises(ValueError, match="BatchNorm requires Tensor inputs; list inputs"):
+        model(values)
+    assert before
+    for name, buffer in model.named_buffers():
+        torch.testing.assert_close(buffer, before[name])
+    assert all(parameter.grad is None for parameter in model.parameters())
+
+
+@pytest.mark.parametrize("kind", ("PointNet", "PointNet2"))
+def test_point_list_rejection_detects_actual_batchnorm_layers(kind):
+    xyz, field = Quantity("xyz", (3,)), Quantity("field")
+    model = getattr(networks, kind)(configuration(kind, normalization="none"),
+                                   inputs={"coordinates": xyz}, outputs={"predictions": field})
+    # The policy must inspect registered modules, not the config's spelling.
+    model.add_module("additional_batchnorm", nn.BatchNorm1d(3))
+    assert model.config.normalization == "none" and model.signature.has_ellipsis
+    with pytest.raises(ValueError, match="BatchNorm requires Tensor inputs; list inputs"):
+        model({xyz: Value([torch.rand(5, 3), torch.rand(5, 3)], ("case", "point"))})
+    assert model.additional_batchnorm.num_batches_tracked.item() == 0
 
 
 @pytest.mark.parametrize("kind", ("GCN", "GAT", "MeshGraphNet"))
@@ -456,6 +476,47 @@ def test_batchnorm_disjoint_batch_axes_follow_declaration_order_not_dictionary_i
         point_features=channels[None, :, :, None].expand(2, 3, 6, 1).reshape(6, 6, 1),
     )).predictions.reshape(2, 3, 6)
     torch.testing.assert_close(actual.tensor, reference)
+
+
+def test_real_geocore_fixed_points_train_pointnet_as_dense_batch():
+    gc = pytest.importorskip("geocore")
+    length, xyz = Quantity("length"), Quantity("coordinates", (3,))
+    mask, field = Quantity("valid_points"), Quantity("prediction")
+    design = gc.Design({
+        "name": "box", "parameters": {"length": {"value": 1., "min": 1., "max": 3.}},
+        "shape": {"box": {"center": [0, 0, 0], "size": ["length", 1., 1.]}},
+    })
+    geometry = GeoCoreModel(
+        design, "POINT_CLOUD", parameters={"length": length}, scenario_axis="case",
+        outputs={"coordinates": xyz, "point_mask": mask},
+        options={"n_points": 16, "features": None, "resolution": .5, "normalization": None},
+        seed=7,
+    )
+    network = networks.PointNet(
+        configuration("PointNet", normalization="batch"),
+        inputs={"coordinates": xyz, "point_mask": mask}, outputs={"predictions": field},
+    )
+    norms = [layer for layer in network.modules()
+             if isinstance(layer, nn.modules.batchnorm._BatchNorm)]
+    assert norms and all(layer.num_batches_tracked.item() == 0 for layer in norms)
+
+    solver = Solver([network, geometry], outputs=(xyz, mask, field))
+    result = solver({length: Value(torch.tensor([1., 2.]), "case")})
+    assert isinstance(result[xyz].tensor, torch.Tensor)
+    assert result[xyz].axes == ("case", "point")
+    assert result[xyz].tensor.shape == (2, 16, 3)
+    assert isinstance(result[mask].tensor, torch.Tensor)
+    assert result[mask].tensor.shape == (2, 16) and result[mask].tensor.all()
+    assert isinstance(result[field].tensor, torch.Tensor)
+    assert result[field].axes == ("case", "point")
+    assert result[field].tensor.shape == (2, 16)
+    assert torch.isfinite(result[field].tensor).all()
+    assert all(layer.num_batches_tracked.item() == 1 for layer in norms)
+
+    result[field].tensor.square().mean().backward()
+    gradients = [parameter.grad for parameter in network.parameters() if parameter.grad is not None]
+    assert gradients and all(torch.isfinite(gradient).all() for gradient in gradients)
+    assert any(torch.count_nonzero(gradient) for gradient in gradients)
 
 
 def test_real_geocore_meshes_feed_native_meshgraphnet_through_solver():
@@ -795,30 +856,28 @@ def test_point_instance_norm_maps_ragged_cases_without_batchnorm(task):
     assert all(torch.isfinite(t.grad).all() for t in members)
 
 
-def test_ragged_pointnet_bn_uses_real_point_statistics_with_tnets_and_dense_scenarios():
+def test_dense_pointnet_bn_uses_all_point_statistics_with_tnets_and_dense_scenarios():
     xyz, field = Quantity("xyz", (3,)), Quantity("field")
     model = networks.PointNet(configuration("PointNet", normalization="batch"),
                               inputs={"coordinates": xyz}, outputs={"predictions": field}).double()
-    points = [torch.rand(2, 3, 3, dtype=torch.double, requires_grad=True),
-              torch.rand(2, 7, 3, dtype=torch.double, requires_grad=True)]
-    # Compute the first layer's expected moments on real inputs, without any
-    # reference to the adapter's padding layout or its normalization helper.
+    points = torch.rand(2, 2, 7, 3, dtype=torch.double, requires_grad=True)
+    # Compute moments over all four dense scenarios using a direct Conv call.
     convolution, bn = model.encoder.first_mlp.layers[:2]
-    real = torch.cat([convolution(t.transpose(1, 2)).movedim(1, -1).reshape(-1, 64) for t in points])
+    real = convolution(points.reshape(4, 7, 3).transpose(1, 2)).movedim(1, -1).reshape(-1, 64)
     expected_mean, expected_var = real.mean(0), real.var(0, unbiased=True)
     actual = model({xyz: Value(points, ("geometry", "scenario", "point"))})[field]
     torch.testing.assert_close(bn.running_mean, .1 * expected_mean)
     torch.testing.assert_close(bn.running_var, .9 + .1 * expected_var)
-    sum(t.square().sum() for t in actual.tensor).backward()
-    assert all(torch.isfinite(t.grad).all() for t in points)
+    actual.tensor.square().sum().backward()
+    assert torch.isfinite(points.grad).all()
 
     # Enable both original T-Nets too: their pooled BNs must see all four
-    # embeddings at once, while their pointwise BNs exclude padding.
+    # embeddings at once, while their pointwise BNs see all real dense points.
     transforms = networks.PointNet(configuration("PointNet", normalization="batch",
                                                   input_transform=True, feature_transform=True),
                                     inputs={"coordinates": xyz}, outputs={"predictions": field}).double()
     result = transforms({xyz: Value(points, ("geometry", "scenario", "point"))})[field]
-    sum(t.square().sum() for t in result.tensor).backward()
+    result.tensor.square().sum().backward()
     for module in transforms.modules():
         if isinstance(module, nn.modules.batchnorm._BatchNorm):
             assert module.num_batches_tracked == 1
@@ -826,7 +885,7 @@ def test_ragged_pointnet_bn_uses_real_point_statistics_with_tnets_and_dense_scen
 
 
 @pytest.mark.parametrize("kind", ("PointNet", "PointNet2"))
-def test_added_padding_does_not_change_point_network_training_or_gradients(kind):
+def test_explicit_dense_masked_slots_do_not_change_point_network_training_or_gradients(kind):
     xyz, mask, field = Quantity("xyz", (3,)), Quantity("valid"), Quantity("field")
     config = configuration(kind, normalization="batch")
     if kind == "PointNet":
@@ -835,32 +894,20 @@ def test_added_padding_does_not_change_point_network_training_or_gradients(kind)
                                    outputs={"predictions": field}).double()
     reference = copy.deepcopy(model)
     real = torch.rand(2, 5, 3, dtype=torch.double, requires_grad=True)
-    copies = [real[0].detach().clone().requires_grad_(), real[1].detach().clone().requires_grad_()]
-    # The second representation has extra masked slots, containing NaNs on
-    # purpose. Neither feature statistics nor valid predictions may change.
-    padded = torch.cat((copies[1], torch.full((3, 3), float("nan"), dtype=torch.double)))
-    actual = model({xyz: Value([copies[0], padded], ("case", "point")),
-                    mask: Value([torch.ones(5, dtype=torch.bool),
-                                 torch.arange(8) < 5], ("case", "point"))})[field].tensor
+    # Padding is supplied explicitly by the caller as a dense Tensor. NaNs in
+    # masked slots must not affect real features, statistics, or gradients.
+    padded = torch.cat((real.detach().clone(),
+                        torch.full((2, 3, 3), float("nan"), dtype=torch.double)), 1).requires_grad_()
+    actual = model({xyz: Value(padded, ("case", "point")),
+                    mask: Value((torch.arange(8)[None] < 5).expand(2, 8), ("case", "point"))})[field].tensor
     expected = reference({xyz: Value(real, ("case", "point")),
                           mask: Value(torch.ones(2, 5, dtype=torch.bool), ("case", "point"))})[field].tensor
-    dense_reference = copy.deepcopy(model)
-    # The same explicit mask must work in a dense padded request as well.
-    # Restore initial buffers so both calls represent the same training step.
-    for module in dense_reference.modules():
-        if isinstance(module, nn.modules.batchnorm._BatchNorm):
-            module.reset_running_stats()
-    dense_points = torch.cat((real.detach(), torch.full((2, 3, 3), float("nan"), dtype=torch.double)), 1)
-    dense = dense_reference.predict(ModelInput(coordinates=dense_points,
-                                               point_mask=(torch.arange(8)[None] < 5).expand(2, 8)))
-    for i in range(2):
-        torch.testing.assert_close(dense.predictions[i, :5, 0], expected[i])
-    for i in range(2):
-        torch.testing.assert_close(actual[i][:5], expected[i])
-    sum(t.square().sum() for t in actual).backward()
+    torch.testing.assert_close(actual[:, :5], expected)
+    assert torch.count_nonzero(actual[:, 5:]) == 0
+    actual.square().sum().backward()
     expected.square().sum().backward()
-    for i in range(2):
-        torch.testing.assert_close(copies[i].grad, real.grad[i])
+    torch.testing.assert_close(padded.grad[:, :5], real.grad)
+    assert torch.isfinite(padded.grad).all() and torch.count_nonzero(padded.grad[:, 5:]) == 0
     for key, value in model.state_dict().items():
         torch.testing.assert_close(value, reference.state_dict()[key])
     for a, b in zip(model.parameters(), reference.parameters()):

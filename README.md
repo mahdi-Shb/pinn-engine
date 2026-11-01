@@ -34,7 +34,8 @@ for optional trimesh operations. `dev` installs the test dependency and
   default to sample independence, with explicit `independence` overrides. Signatures containing `"..."` let the model
   handle named Values directly, with no automatic mapping or permutation.
 - [GeoCore wrapper](docs/geocore.fa.md): sequential CPU generation of design
-  variants as named Tensor lists, with [a runnable example](examples/geocore_design.py).
+  variants as named Tensors for fixed sizes and Tensor lists for variable sizes,
+  with [a runnable example](examples/geocore_design.py).
 - [src/geocore/](src/geocore/): independent geometry package (`import geocore`),
   including its native runtime libraries.
 - [src/pinn_engine/networks/](src/pinn_engine/networks/): native network Models
@@ -42,7 +43,9 @@ for optional trimesh operations. `dev` installs the test dependency and
 - [src/pinn_engine/networks/normalization.py](src/pinn_engine/networks/normalization.py): shared
   dense/list/masked BatchNorm and per-case point normalization.
   [Normalization details](docs/normalization.fa.md) and
-  [upstream change audit](docs/network_upstream_changes.fa.md) document the boundary.
+  [upstream change summary](docs/network_upstream_changes.fa.md) document the boundary.
+- [Detailed Neural3DBench comparison](docs/neural3dbench_comparison.fa.md):
+  interface, numerical behavior, batching, and file-by-file changes from upstream.
 - [third_party/](third_party/): provenance, original documentation, benchmark
   utilities, examples, and tests retained as reference; active runtime packages
   live in `src/`.
@@ -167,6 +170,8 @@ The eleven Neural3DBench networks are native `Model` subclasses under
 `pinn_engine.networks`, installed with the engine. Their constructors accept
 `inputs={role: quantity}` and `outputs={role: quantity}`. Actual BatchNorm modules
 consume the complete batch; graph networks pack disjoint meshes internally.
+PointNet and PointNet++ with BatchNorm require Tensor inputs and reject lists,
+including equal-sized lists and eval mode; they never pad lists automatically.
 Other networks use the engine's named-axis automatic batching. See
 [network layouts and examples](docs/networks.fa.md) and the runnable
 [GeoCore-to-mesh-network example](examples/geocore_mesh_network.py).

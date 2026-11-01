@@ -21,7 +21,7 @@ producer = GeoCoreModel(
 
 
 class Centroid(Model):
-    # The outer list axis is handled by Model; this function sees one point set.
+    # Model vmaps over the dense case axis; this function sees one point set.
     signature = Signature({coordinates: "point"}, {centroid: ()})
 
     def evaluate(self, values):
@@ -31,7 +31,7 @@ class Centroid(Model):
 if __name__ == "__main__":
     solver = Solver([Centroid(), producer], outputs=(coordinates, centroid))
     result = solver({span: Value(torch.tensor([2., 3.]), "case")})
-    print("Point shapes:", [tuple(t.shape) for t in result[coordinates].tensor])
-    print("Centroids:", torch.stack(result[centroid].tensor))
-    # Transfer each Tensor explicitly if the next stage uses CUDA:
-    # gpu_points = Value([t.to("cuda") for t in result[coordinates].tensor], ("case", "point"))
+    print("Point batch shape:", tuple(result[coordinates].tensor.shape))  # (2, 32, 3)
+    print("Centroids:", result[centroid].tensor)  # (2, 3)
+    # Transfer the dense batch explicitly if the next stage uses CUDA:
+    # gpu_points = Value(result[coordinates].tensor.to("cuda"), ("case", "point"))

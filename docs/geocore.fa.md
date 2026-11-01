@@ -11,9 +11,23 @@ python examples/geocore_design.py
 
 `representation` یکی از MESH_GRAPH، POINT_CLOUD، VOXEL_GRID، PARAMETRIC_SURFACE یا PINN_COLLOCATION است؛ aliasهای خود GeoCore مانند PINN هم پذیرفته‌اند. `outputs` نگاشت نام آرایهٔ GeoCore به Quantity کاربر است و فقط خروجی‌های عددی مشخص را می‌پذیرد. `options` تنظیمات builder مانند resolution، تعداد نقاط، normalization و channels است. source، options و Quantityها پس از ساخت مدل تغییر داده نشوند.
 
-تمام خروجی‌ها لیست‌اند و محور اولشان scenario_axis است؛ حتی اعضای هم‌اندازه نیز خودکار stack نمی‌شوند. هر سناریو جدا تولید می‌شود؛ batch داخلی GeoCore برای point cloud، voxel و UV برابر یک است و حذف می‌شود. هیچ padding یا ادغام خودکار گراف‌ها انجام نمی‌شود.
+محور اول تمام خروجی‌ها scenario_axis است. خروجی‌هایی که اندازه‌شان طبق قرارداد source و options ثابت است، در یک Tensor جمع می‌شوند؛ خروجی‌های با اندازهٔ متغیر لیست Tensor می‌مانند، حتی اگر اندازهٔ اعضای یک batch اتفاقاً برابر باشد. این تصمیم به برابری شکل‌های همان batch وابسته نیست. بدون parameters نیز محور سناریو با طول یک حفظ می‌شود.
 
-| خروجی | محورهای داخل هر عضو | شکل ذاتی نمونه |
+| representation / خروجی | نوع مقدار عمومی |
+|---|---|
+| MESH_GRAPH، تمام خروجی‌ها | لیست؛ تعداد رأس، یال و وجه می‌تواند تغییر کند. |
+| POINT_CLOUD با تعداد نقاط مشترک | Tensor؛ مثلاً مختصات `(S,N,3)`، ویژگی‌ها `(S,N,F)` و ماسک `(S,N)` است. |
+| VOXEL_GRID، voxel_fields با shape ثابت یا shape پیش‌فرض | Tensor با شکل `(S,Z,Y,X,C)`. |
+| VOXEL_GRID، voxel_fields با spacing و bounds ثابت | Tensor؛ ابعاد شبکه از bounds ثابت تعیین می‌شود. |
+| VOXEL_GRID، voxel_fields با spacing و bounds وابسته به هندسه | لیست؛ حتی اگر اندازهٔ grid چند سناریو یکسان دربیاید. |
+| VOXEL_GRID، origin و spacing و bounds | Tensor؛ اندازهٔ این اطلاعات در هر سناریو ثابت است، هرچند مقدارشان تغییر می‌کند. |
+| PINN_COLLOCATION | Tensor؛ تعداد نقاط interior، boundary و band از تنظیمات مشترک تعیین می‌شود. |
+| PARAMETRIC_SURFACE از NURBSSurface ثابت | Tensor برای تمام خروجی‌ها. |
+| PARAMETRIC_SURFACE از Design | degree یک Tensor است؛ آرایه‌های ساختاری مانند control_points و knotها لیست می‌مانند. UV و physical_coordinates با تنظیمات نمونه‌برداری ثابت Tensor هستند؛ اگر عبارت‌های Design تعداد نمونه‌ها را تغییر دهند، لیست می‌مانند. |
+
+هر سناریو همچنان جدا تولید می‌شود؛ batch داخلی GeoCore برای point cloud، voxel و UV برابر یک است و حذف می‌شود. سپس فقط خروجی‌های ثابت با `torch.stack` جمع می‌شوند. رپر padding یا ادغام گراف‌ها اضافه نمی‌کند. مثلاً برای ۸ سناریو با `n_points=256`، مقدار مختصات مستقیماً Tensor با شکل `(8,256,3)` است و شبکهٔ بعدی برای تبدیل لیست به batch کاری ندارد.
+
+| خروجی | محورهای داخل هر سناریو | شکل ذاتی نمونه |
 |---|---|---|
 | مختصات mesh | vertex | (3,) |
 | edge_index | edge | (2,) |

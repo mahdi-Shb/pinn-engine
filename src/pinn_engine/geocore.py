@@ -7,6 +7,7 @@ Outputs stay on CPU for explicit transfer.
 
 from __future__ import annotations
 
+from numbers import Integral
 from typing import Mapping
 import torch
 
@@ -71,10 +72,12 @@ class GeoCoreModel(Model):
 
     outputs maps GeoCore array names to caller-owned Quantities. output_axes
     optionally renames the default per-geometry sample axes for each array.
-    Every output is a flat Tensor list with scenario_axis first, including
-    equal-sized members. A fixed source without parameters produces one member.
+    Fixed-size outputs are stacked Tensors with scenario_axis first. Outputs
+    whose sample counts depend on geometry remain flat Tensor lists, even if
+    their sizes happen to match in one batch. Without parameters, the scenario
+    axis still has length one.
 
-    options is forwarded to GeoCore.output. Its internal B is always one;
+    options configures the GeoCore representation builders. Internal B is one;
     scenarios are generated individually without padding/graph concatenation.
     seed replays sampling on each call; None draws fresh samples. Integer and
     boolean arrays keep their dtype. floating_dtype optionally casts floats.
@@ -141,6 +144,40 @@ class GeoCoreModel(Model):
         )
         if {"metadata", "extras", "rng", "batch"} & self.options.keys():
             raise ValueError("metadata, extras, rng and batch are controlled by GeoCoreModel")
+        self._dense_outputs = tuple(name for name in self.outputs_by_name if self._fixed_size_output(name))
+
+    def _fixed_size_output(self, name):
+        """Choose storage from builder settings, never observed batch shapes."""
+        import geocore as gc
+
+        if self.representation == "MESH_GRAPH":
+            return False
+        if self.representation == "VOXEL_GRID":
+            # A spacing-only grid grows with geometry bounds. Grid metadata
+            # retains its fixed intrinsic shape independently of that grid.
+            return (name != "voxel_fields" or self.options.get("shape") is not None
+                    or self.options.get("spacing") is None
+                    or self.options.get("bounds") is not None)
+        if (self.representation == "PARAMETRIC_SURFACE" and isinstance(self.source, gc.Design)
+                and self.options.get("surface") is None):
+            if name == "degree":
+                return True
+            if name not in {"parametric_coordinates", "physical_coordinates"}:
+                # Design expressions can change domain topology, degree, or
+                # refinement. Do not infer constant knot/control counts.
+                return False
+            settings = dict((self.source.data.get("outputs") or {}).get("parametric_surface") or {})
+            settings.update(self.options)
+            if settings.get("uv") is not None:
+                return not isinstance(settings["uv"], str)
+            # Unlike other builders, Design resolves expressions in these
+            # settings per scenario. Only literal sample settings are fixed.
+            return (isinstance(settings.get("n_points", 4096), Integral)
+                    and isinstance(settings.get("include_boundary", 0), Integral)
+                    and settings.get("method", "sobol") in ("sobol", "halton", "random", "grid"))
+        # Point clouds, collocation sets, and fixed NURBS surfaces use the
+        # same point counts / surface discretization for every scenario.
+        return True
 
     @property
     def signature(self):
@@ -171,12 +208,30 @@ class GeoCoreModel(Model):
             parameters = {name: values[q][index].item() for name, q in self.parameters_by_name.items()}
             source = self.source.with_params(**parameters) if parameters else self.source
             options = dict(self.options)
-            # Voxel rasterization is deterministic and has no rng argument.
-            if self.representation != "VOXEL_GRID":
-                options["rng"] = rng
             if self.representation == "PARAMETRIC_SURFACE":
                 options["batch"] = 1
-            data = gc.output(source, self.representation, metadata=False, extras=True, **options)
+            if self.representation == "VOXEL_GRID":
+                # output() treats spacing/bounds as array-selection flags;
+                # call the builder directly to pass these grid settings.
+                from geocore.outputs import geometry_of
+
+                geometry = geometry_of(source, options.pop("geometry_resolution", None))
+                data = gc.voxel_grid(geometry, **options)
+            elif (self.representation == "PARAMETRIC_SURFACE" and isinstance(source, gc.Design)
+                    and options.get("surface") is None
+                    and "parametric_surface" in (source.data.get("outputs") or {})):
+                # Design.outputs owns rng separately from its output settings.
+                # Passing it through gc.output would put rng into the settings
+                # too and pass it twice to the parametric-surface builder.
+                definition = source.to_dict()
+                settings = dict(definition["outputs"]["parametric_surface"] or {})
+                settings.update(options)
+                definition["outputs"] = {"parametric_surface": settings}
+                generated = gc.Design(definition, source.base_dir).outputs(only=["parametric_surface"], rng=rng)
+                data = generated["parametric_surface"]
+            else:
+                options["rng"] = rng
+                data = gc.output(source, self.representation, metadata=False, extras=True, **options)
             for name, q in self.outputs_by_name.items():
                 if name == "point_mask" and name not in data:
                     data[name] = np.ones(data["coordinates"].shape[:2], dtype=bool)
@@ -194,4 +249,10 @@ class GeoCoreModel(Model):
                 if tensor.is_floating_point() and self.floating_dtype is not None:
                     tensor = tensor.to(self.floating_dtype)
                 result[q].append(tensor)
+        for name in self._dense_outputs:
+            q = self.outputs_by_name[name]
+            members = result[q]
+            if any(t.shape != members[0].shape for t in members[1:]):
+                raise ValueError(f"GeoCore output {name!r} violated its fixed-size contract")
+            result[q] = torch.stack(members)
         return result

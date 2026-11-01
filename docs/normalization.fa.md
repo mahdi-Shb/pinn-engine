@@ -34,14 +34,16 @@ PointNet اکنون سه گزینه دارد:
 
 گزینهٔ instance برای PointNet اضافه شده است؛ PointNet++ فعلاً همان گزینه‌های batch و none را دارد. امضای instance شامل `...` نمی‌شود؛ موتور batchهای اضافی را مستقل map می‌کند. استقلال point همچنان False است چون خود normalization و pooling نقاط را به هم وابسته می‌کنند.
 
-## اتصال به شبکه و لیست‌های با اندازهٔ متفاوت
+## اتصال به شبکه و قرارداد ورودی dense
 
-برای PointNet و PointNet++ دارای BatchNorm، `networks/_point_batches.py` ورودی‌های لیستی را موقتاً به یک batch دارای padding تبدیل می‌کند. این padding وارد آمار normalization یا pooling نمی‌شود و پس از اجرا از خروجی حذف می‌شود؛ Value عمومی همچنان لیست است. خود شبکه یک بار اجرا می‌شود و BatchNormهای بعد از pooling تمام embeddingهای واقعی batch را می‌بینند.
+در مسیر `model(values)` و Solver، PointNet و PointNet++ که واقعاً ماژول BatchNorm دارند فقط ورودی Tensor می‌پذیرند. هر ورودی لیستی خطا می‌دهد؛ این محدودیت برای لیست‌های هم‌اندازه و حالت eval نیز برقرار است. موتور برای این دو شبکه padding یا تبدیل خودکار لیست به batch انجام نمی‌دهد. ورودی dense می‌تواند چند محور batch نام‌دار داشته باشد و شبکه آن‌ها را برای یک اجرای BatchNorm به یک B مشترک تبدیل کند.
 
-ماسک از طریق یک context محلیِ محدود به همان فراخوانی به لایه‌های normalization می‌رسد؛ نیازی به تغییر امضای تک‌تک Convها و MLPها نیست. در PointNet++، mask هنگام تغییر سطح/گروه به همان سطح تبدیل می‌شود. تکرار همسایهٔ واقعی در slotهای اضافی radius grouping مطابق الگوریتم اصلی حفظ می‌شود؛ فقط padding و centroidهای نامعتبر جدید حذف می‌شوند. context پس از خروج یا exception پاک می‌شود و batch/cache را در ماژول نگه نمی‌دارد.
+پشتیبانی Tensor/list/mask در خود لایهٔ مستقل BatchNorm همچنان برقرار است؛ این قابلیت به معنی پذیرش لیست توسط کل شبکهٔ PointNet دارای BatchNorm نیست. PointNet با instance یا none، و PointNet++ بدون BatchNorm، همچنان از مسیر معمول موتور برای لیست استفاده می‌کنند.
+
+ماسک صریحی که کاربر همراه ورودی dense می‌دهد همچنان پشتیبانی می‌شود. ماسک از طریق یک context محلیِ محدود به همان فراخوانی به لایه‌های normalization می‌رسد؛ نیازی به تغییر امضای تک‌تک Convها و MLPها نیست. در PointNet++، mask هنگام تغییر سطح/گروه به همان سطح تبدیل می‌شود. تکرار همسایهٔ واقعی در slotهای اضافی radius grouping مطابق الگوریتم اصلی حفظ می‌شود؛ فقط نقاط و centroidهای نامعتبر کنار گذاشته می‌شوند. context پس از خروج یا exception پاک می‌شود و batch/cache را در ماژول نگه نمی‌دارد.
 
 mask صریح در ورودی این دو شبکه نیز اکنون آمار pointwise normalization را محدود می‌کند؛ این اصلاح نسبت به upstream است که mask را فقط در pooling/خروجی اعمال می‌کرد. ورودی‌های نامعتبر پیش از Conv صفر می‌شوند تا NaN نتواند گرادیان وزن‌ها را خراب کند. رفتار dense بدون mask، ترتیب عملیات شبکه، پیش‌فرض batch و کلیدهای state_dict حفظ شده‌اند و با لایه‌های native مقایسه می‌شوند.
 
-این مسیر padding محاسبه و حافظهٔ اضافی دارد؛ هدف آن حفظ معماری اصلی با کمترین تغییر است، نه اجرای packed همهٔ عملیات PointNet. گراف‌ها همچنان با connectivity جدا از هم بسته‌بندی می‌شوند و padding ندارند. BatchNorm3d به‌تنهایی لیست را می‌پذیرد، اما اجرای کامل FNO/U-Net روی gridهای ragged با آمار batch هنوز نیازمند adapter اختصاصی است و خطا می‌دهد؛ padding عمومی grid می‌تواند معنی FFT یا مرزهای convolution را عوض کند.
+گراف‌ها همچنان با connectivity جدا از هم بسته‌بندی می‌شوند و padding ندارند؛ محدودیت تازهٔ لیست فقط برای PointNet و PointNet++ دارای BatchNorm است. BatchNorm3d به‌تنهایی لیست را می‌پذیرد، اما اجرای کامل FNO/U-Net روی gridهای ragged با آمار batch هنوز نیازمند adapter اختصاصی است و خطا می‌دهد؛ padding عمومی grid می‌تواند معنی FFT یا مرزهای convolution را عوض کند.
 
-تست‌ها روی CPU شامل parity با native، آمار بدون padding، شمارنده‌ها، mask/NaN، gradcheck و gradgradcheck، vmap برای instance، آموزش ragged با T-Netها، و برابری خروجی/گرادیان/بافرها پس از افزودن padding هستند. از این تست‌ها تضمین GPU یا fullgraph compilation مسیر masked/list نتیجه نمی‌شود.
+تست‌ها روی CPU شامل parity با native، آمار نمونه‌های معتبر، شمارنده‌ها، mask/NaN، gradcheck و gradgradcheck، vmap برای instance، رد ورودی لیستی در شبکه‌های PointNet دارای BatchNorm و برابری خروجی/گرادیان/بافرها با ماسک صریح ورودی dense هستند. از این تست‌ها تضمین GPU یا fullgraph compilation مسیر masked/list نتیجه نمی‌شود.
