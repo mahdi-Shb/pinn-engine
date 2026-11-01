@@ -9,19 +9,10 @@ from .siren import SineLayer, SIREN, SIRENConfig
 from .transolver import Transolver, TransolverConfig
 from .unet3d import UNet3D, UNet3DConfig
 from .registry import ModelRegistry, create_model
-from .representations import (
-    CoordinateRepresentationAdapter,
-    GraphRepresentationAdapter,
-    GridRepresentationAdapter,
-    ParametricSurfaceRepresentationAdapter,
-    PointCloudRepresentationAdapter,
-    RepresentationAdapter,
-)
-from .types import ModelCapabilities, ModelInput, ModelOutput
+
 
 __all__ = [
     "BaseModelConfig",
-    "CoordinateRepresentationAdapter",
     "DeepNURBS",
     "DeepNURBSConfig",
     "FNO3D",
@@ -32,13 +23,6 @@ __all__ = [
     "GATConfig",
     "GCN",
     "GCNConfig",
-    "GraphRepresentationAdapter",
-    "GridRepresentationAdapter",
-    "ParametricSurfaceRepresentationAdapter",
-    "PointCloudRepresentationAdapter",
-    "ModelCapabilities",
-    "ModelInput",
-    "ModelOutput",
     "ModelRegistry",
     "MeshGraphNet",
     "MeshGraphNetConfig",
@@ -46,7 +30,6 @@ __all__ = [
     "PointNetConfig",
     "PointNet2",
     "PointNet2Config",
-    "RepresentationAdapter",
     "SineLayer",
     "SIREN",
     "SIRENConfig",

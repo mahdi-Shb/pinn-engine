@@ -54,7 +54,7 @@ result.tensor.square().mean().backward()
 
 `model(values)` و `Solver` نگاشت Quantity به Value می‌گیرند و فقط خروجی‌های عددی انتخاب‌شده را می‌دهند. محاسبات هر شبکه داخل `evaluate` همان کلاس است؛ `prepare_inputs` و `finish_outputs` فقط layout، batch و packing گراف را مدیریت می‌کنند. بررسی وابسته به مقدار با `check` داخل evaluate انجام می‌شود؛ بررسی شکل و dtype با شرط معمولی است.
 
-کلاس‌های قدیمی `ModelInput`، `ModelOutput`، `ModelCapabilities` و representation adapterها فقط برای داده/مرجع باقی مانده‌اند و رابط اجرای شبکه نیستند. کد auxiliary و metadata الگوریتم‌های اصلی حفظ شده، ولی خروجی عمومی موتور نیست. انتخاب فقط latent نیز لزوماً محاسبهٔ head پیش‌بینی را حذف نمی‌کند.
+کلاس‌های قدیمی `ModelInput`، `ModelOutput`، `ModelCapabilities` و representation adapterهای بخش networks حذف شده‌اند. ورودی/خروجی شبکه‌ها فقط نگاشت Quantity/Value است؛ تست‌ها نیز از دیکشنری ساده استفاده می‌کنند. `geocore.ModelInput` کلاس مستقلی است و در خروجی GeoCore باقی مانده است. کد auxiliary و metadata الگوریتم‌های اصلی حفظ شده، ولی خروجی عمومی موتور نیست. انتخاب فقط latent نیز لزوماً محاسبهٔ head پیش‌بینی را حذف نمی‌کند.
 
 برای امکان vmap، GINO از ماسک با طول ثابت به جای boolean indexing استفاده می‌کند. در مسیر Model، checkpoint داخلی kernel خاموش است ولی موتور **کل تابع batch‌شده را بیرون تمام vmapها** با `use_reentrant=False` checkpoint می‌کند. batching خودکار حفظ می‌شود و نتایج میانی کمتری برای backward ذخیره می‌شوند؛ در عوض، هنگام مشتق‌گیری محاسبات دوباره اجرا می‌شوند و ناحیهٔ replay بزرگ‌تر از chunkهای kernel قبلی است. محدودیت workspace زوج‌نقاط و chunkهای kernel حفظ شده است. کاهش حافظهٔ ذخیره‌شده برای backward به معنی تضمین مقدار مشخصی از کاهش peak حافظه یا سرعت نیست.
 

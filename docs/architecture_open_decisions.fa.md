@@ -625,3 +625,8 @@ BaseNetwork و BaseGraphNetwork حذف شدند. هر ۱۱ شبکه مستقیم
 ## نام پکیج با حروف کوچک — ۲۰۲۶-۱۱-۰۱
 
 نام پکیج، مسیر سورس و importها به `pinncore` و `src/pinncore` تغییر کردند. نام repo و checkout همچنان `pinn_engine` است. نام uppercase در بندهای تاریخی به وضعیت قبلی اشاره دارد؛ API جاری `from pinncore import ...` است.
+
+
+## حذف ظرف‌ها و adapterهای قدیمی شبکه — ۲۰۲۶-۱۱-۰۱
+
+ModelInput، ModelOutput، ModelCapabilities و representation adapterهای قدیمی از pinncore.networks حذف شدند؛ در مسیر Model/Solver استفاده‌ای نداشتند. دادهٔ کمکی تست‌ها دیکشنری ساده است. کلاس مستقل geocore.ModelInput برای خروجی representationهای GeoCore فعال باقی ماند و تغییر نکرد.

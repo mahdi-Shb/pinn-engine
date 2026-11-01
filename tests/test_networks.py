@@ -1,7 +1,6 @@
 """Native neural models: layouts, numerical parity, batching, training, and AD."""
 
 import copy
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -9,7 +8,6 @@ from torch import nn
 
 from pinncore import Derivative, GeoCoreModel, Model, Quantity, Signature, Solver, Value
 from pinncore import networks
-from pinncore.networks import ModelInput
 from pinncore.networks._contract import _specs
 
 
@@ -65,10 +63,10 @@ def numeric_result(model, request):
     grid = model.config.name in {"fno3d", "unet3d"}
     values = {}
     for role, quantity in model.input_quantities.items():
-        tensor = getattr(request, role)
+        tensor = request.get(role)
         if role == "point_mask" and tensor is None:
-            tensor = torch.ones(request.coordinates.shape[:2], dtype=torch.bool,
-                                device=request.coordinates.device)
+            tensor = torch.ones(request["coordinates"].shape[:2], dtype=torch.bool,
+                                device=request["coordinates"].device)
         if role == "edge_index":
             tensor = tensor.transpose(-2, -1)
         elif grid and role == "voxel_fields":
@@ -86,7 +84,7 @@ def numeric_result(model, request):
         if grid or (model.config.name == "gino" and role == "latent"):
             tensor = tensor.movedim(-1, 1)
         converted[role] = tensor
-    return SimpleNamespace(**converted)
+    return converted
 
 
 def chain_edges(count):
@@ -107,18 +105,18 @@ def reference_case(kind):
         nodes, edges = torch.randn(6, 2), chain_edges(6)
         values = {bindings["node_features"]: Value(nodes, "vertex"),
                   bindings["edge_index"]: Value(edges, "edge")}
-        numerical = ModelInput(node_features=nodes, edge_index=edges.T)
+        numerical = dict(node_features=nodes, edge_index=edges.T)
         if kind == "MeshGraphNet":
             bindings["edge_features"] = Quantity("edge_channels", (2,))
-            numerical.edge_features = torch.randn(len(edges), 2)
-            values[bindings["edge_features"]] = Value(numerical.edge_features, "edge")
+            numerical["edge_features"] = torch.randn(len(edges), 2)
+            values[bindings["edge_features"]] = Value(numerical["edge_features"], "edge")
         latent_shape, latent_axes = (4,), ("vertex",)
         prediction_axes = ("vertex",)
     elif kind in GRID:
         bindings = {"voxel_fields": Quantity("grid_input")}
         volume = torch.randn(2, 4, 4, 4)
         values = {bindings["voxel_fields"]: Value(volume, ("scenario", "z", "y", "x"))}
-        numerical = ModelInput(voxel_fields=volume.unsqueeze(1))
+        numerical = dict(voxel_fields=volume.unsqueeze(1))
         latent_shape = (4,) if kind == "FNO3D" else (8,)
         latent_axes = (("scenario", "z", "y", "x") if kind == "FNO3D" else
                        ("scenario", "bottleneck_z", "bottleneck_y", "bottleneck_x"))
@@ -128,12 +126,12 @@ def reference_case(kind):
         bindings = {"coordinates": Quantity("locations", (dimensions,))}
         coordinates = torch.rand(2, 6, dimensions)
         values = {bindings["coordinates"]: Value(coordinates, ("scenario", "point"))}
-        numerical = ModelInput(coordinates=coordinates)
+        numerical = dict(coordinates=coordinates)
         if kind == "GINO":
             bindings["point_features"] = Quantity("source_field")
-            numerical.point_features = torch.randn(2, 6, 1)
+            numerical["point_features"] = torch.randn(2, 6, 1)
             values[bindings["point_features"]] = Value(
-                numerical.point_features.squeeze(-1), ("scenario", "point"))
+                numerical["point_features"].squeeze(-1), ("scenario", "point"))
             latent_shape, latent_axes = (4,), ("scenario", "latent_z", "latent_y", "latent_x")
         elif kind in {"PointNet", "PointNet2"}:
             latent_shape, latent_axes = (8,), ("scenario",)
@@ -162,7 +160,7 @@ def test_all_networks_are_direct_models_and_match_flattened_requests(kind):
     reference = numeric_result(model, numerical)
     actual = model(values)
     for role, quantity in outputs.items():
-        tensor = getattr(reference, role)
+        tensor = reference[role]
         if kind in GRID or (kind == "GINO" and role == "latent"):
             tensor = tensor.movedim(1, -1)
         tensor = tensor.reshape(*tensor.shape[:-1], *quantity.shape)
@@ -202,8 +200,8 @@ def test_classification_reduces_points_to_per_scenario_quantity(kind):
                                   outputs={"predictions": prediction, "latent": latent}).eval()
     points = torch.rand(2, 6, 3)
     actual = model({coordinates: Value(points, ("case", "point"))})
-    reference = numeric_result(model, ModelInput(coordinates=points))
-    for q, expected in ((prediction, reference.predictions), (latent, reference.latent)):
+    reference = numeric_result(model, dict(coordinates=points))
+    for q, expected in ((prediction, reference["predictions"]), (latent, reference["latent"])):
         assert actual[q].axes == ("case",)
         torch.testing.assert_close(actual[q].tensor, expected)
     assert model.signature.outputs[prediction] == ()
@@ -218,9 +216,9 @@ def test_output_components_can_be_reshaped_to_tensor_quantity_and_inputs_can_be_
     axes = ("family", "scenario", "point")
     actual = model({xyz: Value(coordinates, axes), feature: Value(scalar, axes)})[stress]
     assert actual.axes == axes and actual.tensor.shape == (2, 3, 6, 3, 3)
-    expected = numeric_result(model, ModelInput(coordinates=coordinates.flatten(0, 1),
+    expected = numeric_result(model, dict(coordinates=coordinates.flatten(0, 1),
                                        point_features=scalar.flatten(0, 1).unsqueeze(-1)))
-    torch.testing.assert_close(actual.tensor, expected.predictions.reshape(2, 3, 6, 3, 3))
+    torch.testing.assert_close(actual.tensor, expected["predictions"].reshape(2, 3, 6, 3, 3))
 
 
 @pytest.mark.parametrize("kind", ("PointNet", "PointNet2", "Transolver", "SIREN", "GINO"))
@@ -232,21 +230,21 @@ def test_no_batchnorm_extra_dense_axes_and_optional_masks(kind):
     valid[..., -1] = False
     values = {xyz: Value(points, ("family", "scenario", "point")),
               mask: Value(valid, ("family", "scenario", "point"))}
-    numerical = ModelInput(coordinates=points.flatten(0, 1), point_mask=valid.flatten(0, 1))
+    numerical = dict(coordinates=points.flatten(0, 1), point_mask=valid.flatten(0, 1))
     if kind == "GINO":
         inputs["point_features"] = Quantity("feature")
-        numerical.point_features = torch.rand(4, 6, 1)
+        numerical["point_features"] = torch.rand(4, 6, 1)
         # Masked padding is not required to contain valid coordinates/features.
         points[..., -1, :] = float("nan")
-        numerical.point_features[:, -1, :] = float("nan")
-        values[inputs["point_features"]] = Value(numerical.point_features.reshape(2, 2, 6),
+        numerical["point_features"][:, -1, :] = float("nan")
+        values[inputs["point_features"]] = Value(numerical["point_features"].reshape(2, 2, 6),
                                                  ("family", "scenario", "point"))
     model = getattr(networks, kind)(configuration(kind), inputs=inputs,
                                   outputs={"predictions": result}).eval()
     assert not model.signature.has_ellipsis
     actual = model(values)[result]
     assert actual.axes == ("family", "scenario", "point")
-    expected = numeric_result(model, numerical).predictions.reshape(2, 2, 6)
+    expected = numeric_result(model, numerical)["predictions"].reshape(2, 2, 6)
     torch.testing.assert_close(actual.tensor, expected, atol=3e-6, rtol=3e-5)
     torch.testing.assert_close(actual.tensor[..., -1], torch.zeros(2, 2))
 
@@ -270,7 +268,7 @@ def test_no_batchnorm_ragged_list_mapping_preserves_case_structure(kind):
         arguments = {"coordinates": points.unsqueeze(0)}
         if kind == "GINO":
             arguments["point_features"] = values[feature].tensor[index][None, :, None]
-        expected = numeric_result(model, ModelInput(**arguments)).predictions[0, :, 0]
+        expected = numeric_result(model, dict(**arguments))["predictions"][0, :, 0]
         torch.testing.assert_close(actual.tensor[index], expected, atol=3e-6, rtol=3e-5)
 
 
@@ -303,7 +301,7 @@ def test_actual_batchnorm_consumes_entire_batch_and_trains_once(kind, normalizat
         if isinstance(module, nn.modules.batchnorm._BatchNorm):
             assert module.num_batches_tracked.item() == 1
     if kind not in GRAPH:
-        expected = numeric_result(reference, numerical).predictions
+        expected = numeric_result(reference, numerical)["predictions"]
         if kind in GRID:
             expected = expected.movedim(1, -1)
         torch.testing.assert_close(actual.tensor, expected.squeeze(-1), atol=3e-6, rtol=3e-5)
@@ -353,7 +351,7 @@ def test_batchnorm_multiple_dense_axes_form_one_real_training_batch(monkeypatch)
         return original(request)
     monkeypatch.setattr(model, "evaluate", counted)
     actual = model({xyz: Value(torch.stack(members), ("family", "scenario", "point"))})[field]
-    expected = numeric_result(reference, ModelInput(coordinates=torch.cat(members, 0))).predictions[..., 0]
+    expected = numeric_result(reference, dict(coordinates=torch.cat(members, 0)))["predictions"][..., 0]
     assert count[0] == 1 and actual.axes == ("family", "scenario", "point")
     assert isinstance(actual.tensor, torch.Tensor) and actual.tensor.shape == (2, 3, 6)
     for index in range(2):
@@ -439,7 +437,7 @@ def test_mesh_disjoint_packing_ragged_batches_solver_and_gradients(kind, monkeyp
         kwargs = {"node_features": node, "edge_index": indices[index].T}
         if kind == "MeshGraphNet":
             kwargs["edge_features"] = edge_values[index]
-        expected.append(numeric_result(model, ModelInput(**kwargs)).predictions[:, 0])
+        expected.append(numeric_result(model, dict(**kwargs))["predictions"][:, 0])
     count = [0]
     original = model.evaluate
     def counted(request):
@@ -481,7 +479,7 @@ def test_mesh_dense_multiple_batch_axes_and_shared_connectivity(kind):
             kwargs = {"node_features": node_values[family, scenario], "edge_index": connectivity.T}
             if kind == "MeshGraphNet":
                 kwargs["edge_features"] = values[edge_features].tensor
-            reference = numeric_result(model, ModelInput(**kwargs)).predictions[..., 0]
+            reference = numeric_result(model, dict(**kwargs))["predictions"][..., 0]
             torch.testing.assert_close(actual.tensor[family, scenario], reference)
 
 
@@ -498,8 +496,8 @@ def test_mesh_disjoint_batch_axes_follow_declared_input_order_not_dictionary_ins
     assert actual.axes == ("family", "scenario", "vertex") and actual.tensor.shape == (2, 3, 5)
     for family in range(2):
         for scenario in range(3):
-            reference = numeric_result(model, ModelInput(node_features=node_values[family],
-                                                  edge_index=connectivity[scenario].T)).predictions[:, 0]
+            reference = numeric_result(model, dict(node_features=node_values[family],
+                                                  edge_index=connectivity[scenario].T))["predictions"][:, 0]
             torch.testing.assert_close(actual.tensor[family, scenario], reference)
 
 
@@ -513,10 +511,10 @@ def test_batchnorm_disjoint_batch_axes_follow_declaration_order_not_dictionary_i
               xyz: Value(coordinates, ("family", "point"))}
     actual = model(values)[field]
     assert actual.axes == ("family", "scenario", "point") and actual.tensor.shape == (2, 3, 6)
-    reference = numeric_result(model, ModelInput(
+    reference = numeric_result(model, dict(
         coordinates=coordinates[:, None].expand(2, 3, 6, 3).reshape(6, 6, 3),
         point_features=channels[None, :, :, None].expand(2, 3, 6, 1).reshape(6, 6, 1),
-    )).predictions.reshape(2, 3, 6)
+    ))["predictions"].reshape(2, 3, 6)
     torch.testing.assert_close(actual.tensor, reference)
 
 
@@ -608,9 +606,9 @@ def test_gino_distinct_queries_are_independent_but_source_predictions_are_not():
               query: Value(torch.rand(2, 7, 3), ("scenario", "query"))}
     actual = model(values)[output]
     assert actual.axes == ("scenario", "query") and actual.tensor.shape == (2, 7)
-    request = ModelInput(coordinates=values[xyz].tensor, point_features=values[source].tensor[..., None],
+    request = dict(coordinates=values[xyz].tensor, point_features=values[source].tensor[..., None],
                          query_coordinates=values[query].tensor)
-    torch.testing.assert_close(actual.tensor, numeric_result(model, request).predictions[..., 0], atol=3e-6, rtol=3e-5)
+    torch.testing.assert_close(actual.tensor, numeric_result(model, request)["predictions"][..., 0], atol=3e-6, rtol=3e-5)
 
 
 def test_gino_query_derivative_uses_independent_query_contract():
@@ -621,8 +619,8 @@ def test_gino_query_derivative_uses_independent_query_contract():
                           outputs={"predictions": output}).eval()
     coordinates, features = torch.rand(1, 5, 3), torch.randn(1, 5, 1)
     queries = torch.rand(1, 7, 3, requires_grad=True)
-    reference = numeric_result(model, ModelInput(coordinates=coordinates, point_features=features,
-                                         query_coordinates=queries)).predictions
+    reference = numeric_result(model, dict(coordinates=coordinates, point_features=features,
+                                         query_coordinates=queries))["predictions"]
     expected = torch.autograd.grad(reference.sum(), queries)[0]
     derivative = Derivative(output, query)
     actual = Solver([model], outputs=derivative)({
@@ -657,16 +655,16 @@ def test_gino_masked_full_points_match_physically_sliced_sources_and_queries():
         # independently of the new fixed-shape masked implementation.
         sliced = dict(coordinates=coordinates[case, valid[case]].unsqueeze(0),
                       point_features=features[case, valid[case]][None, :, None])
-        reference_queried = numeric_result(queried, ModelInput(**sliced, query_coordinates=queries[case:case + 1]))
-        reference_default = numeric_result(default, ModelInput(**sliced))
+        reference_queried = numeric_result(queried, dict(**sliced, query_coordinates=queries[case:case + 1]))
+        reference_default = numeric_result(default, dict(**sliced))
         torch.testing.assert_close(actual_queried[prediction].tensor[case],
-                                   reference_queried.predictions[0, :, 0], atol=3e-6, rtol=3e-5)
+                                   reference_queried["predictions"][0, :, 0], atol=3e-6, rtol=3e-5)
         torch.testing.assert_close(actual_default[prediction].tensor[case, valid[case]],
-                                   reference_default.predictions[0, :, 0], atol=3e-6, rtol=3e-5)
+                                   reference_default["predictions"][0, :, 0], atol=3e-6, rtol=3e-5)
         torch.testing.assert_close(actual_default[prediction].tensor[case, ~valid[case]],
                                    torch.zeros((~valid[case]).sum()))
         for actual, reference in ((actual_queried, reference_queried), (actual_default, reference_default)):
-            torch.testing.assert_close(actual[latent].tensor[case], reference.latent.movedim(1, -1)[0],
+            torch.testing.assert_close(actual[latent].tensor[case], reference["latent"].movedim(1, -1)[0],
                                        atol=3e-6, rtol=3e-5)
 
 
@@ -704,7 +702,7 @@ def test_siren_engine_derivative_matches_direct_autograd_and_dependent_model_is_
                            outputs={"predictions": temperature}).eval()
     derivative = Derivative(temperature, xyz)
     points = torch.rand(2, 6, 3, requires_grad=True)
-    reference = numeric_result(model, ModelInput(coordinates=points)).predictions[..., 0]
+    reference = numeric_result(model, dict(coordinates=points))["predictions"][..., 0]
     expected = torch.autograd.grad(reference.sum(), points)[0]
     actual = Solver([model], outputs=derivative)({xyz: Value(points.detach(), ("case", "point"))})[derivative]
     assert actual.axes == ("case", "point")
@@ -892,7 +890,7 @@ def test_point_instance_norm_maps_ragged_cases_without_batchnorm(task):
     assert actual.axes == (("geometry", "scenario") if task == "classification"
                            else ("geometry", "scenario", "point"))
     for i, points in enumerate(members):
-        reference = numeric_result(model, ModelInput(coordinates=points, point_mask=masks[i])).predictions[..., 0]
+        reference = numeric_result(model, dict(coordinates=points, point_mask=masks[i]))["predictions"][..., 0]
         torch.testing.assert_close(actual.tensor[i], reference)
     sum(t.square().sum() for t in actual.tensor).backward()
     assert all(torch.isfinite(t.grad).all() for t in members)
@@ -976,14 +974,14 @@ def test_dense_batchnorm_keeps_original_native_pytorch_numerics(kind):
             else:
                 restore_native(child)
     restore_native(original)
-    for field_name in numerical.__dataclass_fields__:
-        value = getattr(numerical, field_name)
+    for field_name in numerical:
+        value = numerical[field_name]
         if isinstance(value, torch.Tensor) and value.is_floating_point():
-            setattr(numerical, field_name, value.double())
+            numerical[field_name] = value.double()
     actual, expected = numeric_result(model, numerical), numeric_result(original, numerical)
-    torch.testing.assert_close(actual.predictions, expected.predictions)
-    if actual.latent is not None:
-        torch.testing.assert_close(actual.latent, expected.latent)
+    torch.testing.assert_close(actual["predictions"], expected["predictions"])
+    if actual["latent"] is not None:
+        torch.testing.assert_close(actual["latent"], expected["latent"])
     assert set(model.state_dict()) == set(original.state_dict())
     for key, value in model.state_dict().items():
         torch.testing.assert_close(value, original.state_dict()[key])

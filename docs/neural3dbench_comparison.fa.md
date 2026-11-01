@@ -1,5 +1,7 @@
 # تفاوت Neural3DBench اصلی با شبکه‌های فعلی PINNCore
 
+> پاک‌سازی بعدی: ModelInput/Output/Capabilities و representation adapterهای بخش networks حذف شده‌اند. اشاره به نگهداری این کلاس‌ها در متن/diff زیر مربوط به snapshot پیشین است؛ geocore.ModelInput کلاس دیگری است و حذف نشده است.
+
 > نام جاری پکیج `pinncore` و مسیر آن `src/pinncore` است. نام uppercase در متن و diff این گزارش به snapshot کد e256e93 پیش از تغییر حروف اشاره دارد؛ API جاری `from pinncore import ...` است.
 
 تاریخ بازبینی: ۲۰۲۶-۱۱-۰۱. کد مقایسه‌شده: commit موتور `e256e93`، پس از حذف BaseNetwork. این گزارش وضعیت فعلی را توضیح می‌دهد؛ diff آن نیز از نو تولید شده است.
