@@ -1,6 +1,6 @@
 # شبکه‌های Neural3DBench در قرارداد موتور
 
-هر ۱۱ شبکه مستقیماً subclass از `Model` هستند و پارامترها/زیرماژول‌های اصلی را نگه می‌دارند؛ adapter جدا لازم نیست. همراه خود موتور نصب می‌شوند:
+هر ۱۱ شبکه مستقیماً از `Model` ارث می‌برند و `signature` و `evaluate` خودشان را دارند. `BaseNetwork`، `BaseGraphNetwork` و متد `predict` حذف شده‌اند؛ اجرای معمول همان `network(values)` است. پارامترها و زیرماژول‌های اصلی حفظ شده‌اند:
 
 ```python
 import torch
@@ -52,11 +52,13 @@ result.tensor.square().mean().backward()
 
 ## سازگاری و محدودیت‌های فعلی
 
-`model(values)` و `Solver` فقط خروجی‌های انتخاب‌شدهٔ عددی را تحویل می‌دهند. `model.predict(ModelInput(...))` مسیر عددی با شکل‌های اصلی Neural3DBench است و `ModelOutput`، auxiliary و metadata را حفظ می‌کند. کد آن خروجی‌ها حذف نشده است. الگوریتم اصلی ممکن است head خروجی انتخاب‌نشده را هم اجرا کند؛ حذف محاسبهٔ headها در این تغییر پیاده نشده است.
+`model(values)` و `Solver` نگاشت Quantity به Value می‌گیرند و فقط خروجی‌های عددی انتخاب‌شده را می‌دهند. محاسبات هر شبکه داخل `evaluate` همان کلاس است؛ `prepare_inputs` و `finish_outputs` فقط layout، batch و packing گراف را مدیریت می‌کنند. بررسی وابسته به مقدار با `check` داخل evaluate انجام می‌شود؛ بررسی شکل و dtype با شرط معمولی است.
+
+کلاس‌های قدیمی `ModelInput`، `ModelOutput`، `ModelCapabilities` و representation adapterها فقط برای داده/مرجع باقی مانده‌اند و رابط اجرای شبکه نیستند. کد auxiliary و metadata الگوریتم‌های اصلی حفظ شده، ولی خروجی عمومی موتور نیست. انتخاب فقط latent نیز لزوماً محاسبهٔ head پیش‌بینی را حذف نمی‌کند.
 
 برای امکان vmap، GINO از ماسک با طول ثابت به جای boolean indexing استفاده می‌کند. در مسیر Model، checkpoint داخلی kernel خاموش است ولی موتور **کل تابع batch‌شده را بیرون تمام vmapها** با `use_reentrant=False` checkpoint می‌کند. batching خودکار حفظ می‌شود و نتایج میانی کمتری برای backward ذخیره می‌شوند؛ در عوض، هنگام مشتق‌گیری محاسبات دوباره اجرا می‌شوند و ناحیهٔ replay بزرگ‌تر از chunkهای kernel قبلی است. محدودیت workspace زوج‌نقاط و chunkهای kernel حفظ شده است. کاهش حافظهٔ ذخیره‌شده برای backward به معنی تضمین مقدار مشخصی از کاهش peak حافظه یا سرعت نیست.
 
-این رفتار فقط برای GINO با `checkpoint_batches=True` پیش‌فرض فعال است؛ برای مقایسه می‌توان روی instance مقدار False گذاشت. در مدل‌های دیگر پیش‌فرض False است. این گزینه به مسیر عادی batching موتور مربوط است؛ مسیر wildcard مدل، batching را خودش مدیریت می‌کند. در batch لیستی برای هر عضو checkpoint جدا و در حالت بدون محور batch نیز یک checkpoint روی فراخوانی core ساخته می‌شود. در `torch.no_grad()` موتور checkpoint را کنار می‌گذارد. در `predict(ModelInput)` checkpoint داخلی قبلی همچنان فعال است.
+این رفتار فقط برای GINO با `checkpoint_batches=True` پیش‌فرض فعال است؛ برای مقایسه می‌توان روی instance مقدار False گذاشت. در مدل‌های دیگر پیش‌فرض False است. این گزینه به مسیر عادی batching موتور مربوط است؛ مسیر wildcard مدل، batching را خودش مدیریت می‌کند. در batch لیستی برای هر عضو checkpoint جدا و در حالت بدون محور batch نیز یک checkpoint روی فراخوانی core ساخته می‌شود. در `torch.no_grad()` موتور checkpoint را کنار می‌گذارد. مسیر جداگانهٔ predict وجود ندارد و checkpoint داخلی kernel در اجرای شبکه خاموش است.
 
 checkpoint نیازمند محاسبهٔ قابل replay است؛ نباید آن را بدون بررسی برای مدل‌های دارای تغییر state مانند آمار BatchNorm فعال کرد. خروجی، گرادیان‌ها و مشتق‌های تا مرتبهٔ سوم GINO، از جمله مشتق‌های query در Solver و آموزش با loss شامل مشتق مرتبهٔ سوم، با مسیر بدون checkpoint تست شده‌اند. پشتیبانی همهٔ ترکیب‌های torch.func یا compile از این تست‌ها نتیجه نمی‌شود.
 

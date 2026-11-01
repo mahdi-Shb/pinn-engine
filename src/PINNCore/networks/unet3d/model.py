@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from PINNCore.quantities import Quantity
-
 import torch
 from torch import nn
 
-from ..base import BaseNetwork
+from PINNCore.model import Model
+from PINNCore.quantities import Quantity
+
+from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 from ..configs import BaseModelConfig
-from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .components import DecoderBlock3D, EncoderBlock3D, VolumetricOutputHead
 
@@ -58,10 +58,11 @@ class UNet3DConfig(BaseModelConfig):
             raise ValueError("upsampling must be transpose_conv or interpolate.")
 
 
-class UNet3D(BaseNetwork):
+class UNet3D(Model):
     """Encoder-decoder 3D U-Net producing raw voxel-wise logits or values."""
 
     config_class = UNet3DConfig
+    vmap_randomness = "different"
 
     def __init__(
         self,
@@ -70,7 +71,9 @@ class UNet3D(BaseNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ):
-        super().__init__(config=config or UNet3DConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or UNet3DConfig()
+        initialize_contract(self, inputs, outputs)
         channels = [
             self.config.base_channels * self.config.channel_multiplier**level
             for level in range(self.config.levels)
@@ -108,59 +111,50 @@ class UNet3D(BaseNetwork):
         self.head = VolumetricOutputHead(channels[0], self.config.output_channels)
 
     @property
-    def required_inputs(self) -> set[str]:
-        return {"voxel_fields"}
+    def signature(self):
+        return contract_signature(self)
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return ModelCapabilities(
-            representation="GRID",
-            requires={"voxel_fields"},
-            supports={"boundary_mask", "material_properties"},
-            variable_geometry=False,
-            variable_node_count=False,
-        )
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            volume = inputs["voxel_fields"]
+            if volume.ndim != 5:
+                raise ValueError(
+                    "UNet3D voxel_fields must have shape [B, C, D, H, W], "
+                    f"got {tuple(volume.shape)}."
+                )
+            if volume.shape[1] != self.config.input_channels:
+                raise ValueError(
+                    f"UNet3D expects {self.config.input_channels} input channels, "
+                    f"got {volume.shape[1]}."
+                )
+            if not volume.is_floating_point():
+                raise TypeError("voxel_fields must use a floating-point dtype.")
+            minimum_size = 2 ** (self.config.levels - 1)
+            if any(size < minimum_size for size in volume.shape[-3:]):
+                raise ValueError(
+                    f"Each spatial dimension must be at least {minimum_size} for "
+                    f"{self.config.levels} levels."
+                )
 
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-        volume = self._ensure_tensor(inputs.voxel_fields, name="voxel_fields")
-        if volume.ndim != 5:
-            raise ValueError(
-                "UNet3D voxel_fields must have shape [B, C, D, H, W], "
-                f"got {tuple(volume.shape)}."
+            parameter = next(self.parameters())
+            hidden = torch.as_tensor(
+                inputs.get("voxel_fields"), device=parameter.device, dtype=parameter.dtype
             )
-        if volume.shape[1] != self.config.input_channels:
-            raise ValueError(
-                f"UNet3D expects {self.config.input_channels} input channels, "
-                f"got {volume.shape[1]}."
-            )
-        if not volume.is_floating_point():
-            raise TypeError("voxel_fields must use a floating-point dtype.")
-        minimum_size = 2 ** (self.config.levels - 1)
-        if any(size < minimum_size for size in volume.shape[-3:]):
-            raise ValueError(
-                f"Each spatial dimension must be at least {minimum_size} for "
-                f"{self.config.levels} levels."
-            )
-        return True
+            skips: list[torch.Tensor] = []
+            for encoder in self.encoders:
+                skip, hidden = encoder(hidden)
+                skips.append(skip)
 
-    def _predict(self, inputs: ModelInput) -> ModelOutput:
-        parameter = next(self.parameters())
-        hidden = torch.as_tensor(
-            inputs.voxel_fields, device=parameter.device, dtype=parameter.dtype
-        )
-        skips: list[torch.Tensor] = []
-        for encoder in self.encoders:
-            skip, hidden = encoder(hidden)
-            skips.append(skip)
-
-        bottleneck = skips[-1]
-        hidden = bottleneck
-        for decoder, skip in zip(self.decoders, reversed(skips[:-1])):
-            hidden = decoder(hidden, skip)
-        predictions = self.head(hidden)
-        return ModelOutput(
-            predictions=predictions,
-            latent=bottleneck,
-            metadata={"spatial_shape": tuple(predictions.shape[-3:])},
-        )
+            bottleneck = skips[-1]
+            hidden = bottleneck
+            for decoder, skip in zip(self.decoders, reversed(skips[:-1])):
+                hidden = decoder(hidden, skip)
+            predictions = self.head(hidden)
+            results.append(dict(
+                predictions=predictions,
+                latent=bottleneck,
+                metadata={"spatial_shape": tuple(predictions.shape[-3:])},
+            ))
+        return finish_outputs(self, results, layout)

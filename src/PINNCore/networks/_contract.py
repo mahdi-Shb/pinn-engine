@@ -13,7 +13,8 @@ import torch
 
 from ..model import Signature
 from ..quantities import Quantity
-from ..values import Value, _check_value
+from ..values import Value
+from ..checks import check
 from .normalization import batch_norms, uses_batch_statistics
 
 
@@ -174,107 +175,102 @@ def _prepared_batches(model, values):
     return batch, list_axis, groups
 
 
-def _model_input(model, raw):
-    from .types import ModelInput
+
+def _native_input(model, raw):
+    """Translate engine component layouts to the original numeric layouts."""
     raw = dict(raw)
     if model.config.name in _GRIDS:
         raw["voxel_fields"] = raw["voxel_fields"].movedim(-1, 1)
     if "point_mask" in raw:
         raw["point_mask"] = raw["point_mask"].squeeze(-1)
-    return ModelInput(**raw)
-
-
-def validate_contract(model, values):
-    """Run data-dependent input checks before entering torch.func.vmap."""
-    if set(values) != set(model.inputs):
-        raise ValueError(f"Expected input quantities: {[q.name for q in model.inputs]}")
-    sizes = {}
-    for q, v in values.items():
-        _check_value(q, v, sizes)
-    _, _, groups = _prepared_batches(model, values)
-    for _, raw in groups:
-        if model.config.name in _GRAPHS:
-            for i in range(raw["node_features"].shape[0]):
-                model.validate_inputs(_graph_input(model, {r: t[i] for r, t in raw.items()}))
-        else:
-            model.validate_inputs(_model_input(model, raw))
+    return raw
 
 
 def _outputs(model, result, batch_shape):
-    """Restore intrinsic Quantity shapes, never folding sample axes into them."""
-    _, specs, _ = _specs(model)
+    """Restore intrinsic Quantity shapes without folding sample axes into them."""
     converted = {}
     for role, q in model.output_quantities.items():
-        tensor = getattr(result, role)
+        tensor = result[role]
         if model.config.name in _GRIDS or (model.config.name == "gino" and role == "latent"):
             tensor = tensor.movedim(1, -1)
-        core_shape = tensor.shape[1:-1]
-        converted[q] = tensor.reshape(batch_shape + core_shape + q.shape)
+        converted[q] = tensor.reshape(batch_shape + tensor.shape[1:-1] + q.shape)
     return converted
 
 
-def _graph_input(model, raw):
-    from .types import ModelInput
-    raw = dict(raw)
-    edges = raw["edge_index"]
-    if edges.dtype not in (torch.int32, torch.int64):
-        raise TypeError("edge_index must have an integer dtype")
-    raw["edge_index"] = edges.transpose(-2, -1).long()
-    return ModelInput(**raw)
-
-
-def _evaluate_graphs(model, values):
-    """Pack disjoint meshes once, then split without padding or cross edges."""
-    batch, list_axis, groups = _prepared_batches(model, values)
-    members = [({r: t[i] for r, t in raw.items()}, group_index)
-               for group_index, (_, raw) in enumerate(groups)
-               for i in range(raw["node_features"].shape[0])]
+def _pack_graphs(groups):
+    """Validate local indices before offsetting and packing disjoint graphs."""
     nodes, edges, features, lengths = [], [], [], []
     offset = 0
-    for raw, _ in members:
-        lengths.append(raw["node_features"].shape[0])
-        nodes.append(raw["node_features"])
-        edges.append(raw["edge_index"] + offset)
-        if "edge_features" in raw:
-            features.append(raw["edge_features"])
-        offset += lengths[-1]
-    packed = {"node_features": torch.cat(nodes), "edge_index": torch.cat(edges)}
+    for _, raw in groups:
+        for i in range(raw["node_features"].shape[0]):
+            node = raw["node_features"][i]
+            edge = raw["edge_index"][i]
+            if node.ndim != 2 or node.shape[0] == 0:
+                raise ValueError("node_features must have shape [N, F] with N > 0")
+            if edge.ndim != 2 or edge.shape[-1] != 2:
+                raise ValueError("edge_index must have shape [E, 2]")
+            if edge.dtype not in (torch.int32, torch.int64):
+                raise TypeError("edge_index must have an integer dtype")
+            check(((edge >= 0) & (edge < node.shape[0])).all(),
+                  "edge_index entries must be in the range [0, N) for each graph")
+            lengths.append(node.shape[0])
+            nodes.append(node)
+            edges.append(edge + offset)
+            if "edge_features" in raw:
+                features.append(raw["edge_features"][i])
+            offset += node.shape[0]
+    packed = {"node_features": torch.cat(nodes), "edge_index": torch.cat(edges).T.long()}
     if features:
         packed["edge_features"] = torch.cat(features)
-    prediction = model._predict(_graph_input(model, packed))
-    outputs = {}
-    for role, q in model.output_quantities.items():
-        split = getattr(prediction, role).split(lengths)
-        collected, cursor = [], 0
-        for shape, raw in groups:
-            count = raw["node_features"].shape[0]
-            tensors = split[cursor:cursor + count]
-            cursor += count
-            collected.append(torch.stack(tensors).reshape(shape + (tensors[0].shape[0],) + q.shape))
-        outputs[q] = Value(collected if list_axis else collected[0], batch + ("vertex",))
-    return outputs
+    return packed, lengths
 
 
-def evaluate_contract(model, values):
-    """Run a core call, or own the whole batch for BatchNorm and mesh packing."""
-    if model.config.name in _GRAPHS:
-        return _evaluate_graphs(model, values)
+def prepare_inputs(model, values):
+    """Prepare numeric requests; the calling model owns all network computation."""
     if not model.signature.has_ellipsis:
         specs, _, _ = _specs(model)
         raw = {role: values[q].reshape((1,) + values[q].shape[:len(specs[role][0])] + (specs[role][1],))
                for role, q in model.input_quantities.items()}
-        return _outputs(model, model._predict(_model_input(model, raw)), ())
+        return [_native_input(model, raw)], None
 
     batch, list_axis, groups = _prepared_batches(model, values)
+    layout = {"batch": batch, "list_axis": list_axis, "groups": groups}
+    if model.config.name in _GRAPHS:
+        packed, lengths = _pack_graphs(groups)
+        layout["lengths"] = lengths
+        return [packed], layout
+
     shapes = {tuple(t.shape[1:] for t in raw.values()) for _, raw in groups}
     if len(shapes) > 1 and uses_batch_statistics(model):
         raise ValueError("Ragged grid execution requires network-specific handling before BatchNorm")
-    if len(shapes) == 1:
-        # Equal-sized list members participate in one real BatchNorm batch too.
-        raw = {r: torch.cat([g[r] for _, g in groups], dim=0) for r in groups[0][1]}
-        result = model._predict(_model_input(model, raw))
-        flat = _outputs(model, result, (sum(prod(shape) for shape, _ in groups),))
-        outputs = {q: [] for q in model.outputs}
+    layout["combined"] = len(shapes) == 1
+    if layout["combined"]:
+        raw = {role: torch.cat([g[role] for _, g in groups], dim=0) for role in groups[0][1]}
+        return [_native_input(model, raw)], layout
+    return [_native_input(model, raw) for _, raw in groups], layout
+
+
+def finish_outputs(model, results, layout):
+    """Restore named outputs after the model has evaluated its numeric requests."""
+    if layout is None:
+        return _outputs(model, results[0], ())
+    groups, batch, list_axis = layout["groups"], layout["batch"], layout["list_axis"]
+    if "lengths" in layout:
+        outputs = {}
+        for role, q in model.output_quantities.items():
+            split = results[0][role].split(layout["lengths"])
+            collected, cursor = [], 0
+            for shape, raw in groups:
+                count = raw["node_features"].shape[0]
+                tensors = split[cursor:cursor + count]
+                cursor += count
+                collected.append(torch.stack(tensors).reshape(shape + (tensors[0].shape[0],) + q.shape))
+            outputs[q] = Value(collected if list_axis else collected[0], batch + ("vertex",))
+        return outputs
+
+    outputs = {q: [] for q in model.outputs}
+    if layout["combined"]:
+        flat = _outputs(model, results[0], (sum(prod(shape) for shape, _ in groups),))
         cursor = 0
         for shape, _ in groups:
             count = prod(shape)
@@ -282,11 +278,9 @@ def evaluate_contract(model, values):
                 outputs[q].append(tensor[cursor:cursor + count].reshape(shape + tensor.shape[1:]))
             cursor += count
     else:
-        # Evaluation with frozen statistics needs no common point/grid size.
-        outputs = {q: [] for q in model.outputs}
-        for shape, raw in groups:
-            for q, tensor in _outputs(model, model._predict(_model_input(model, raw)), shape).items():
+        for (shape, _), result in zip(groups, results):
+            for q, tensor in _outputs(model, result, shape).items():
                 outputs[q].append(tensor)
     specs = _specs(model)[1]
-    return {q: Value(outputs[q] if list_axis else outputs[q][0], batch + specs[r][0])
-            for r, q in model.output_quantities.items()}
+    return {q: Value(outputs[q] if list_axis else outputs[q][0], batch + specs[role][0])
+            for role, q in model.output_quantities.items()}

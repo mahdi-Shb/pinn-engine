@@ -5,18 +5,18 @@ from typing import Any, Mapping, get_args, get_origin, Union
 
 from PINNCore.quantities import Quantity
 
-from .base import BaseNetwork
+from PINNCore.model import Model
 from .configs import BaseModelConfig
 
 
 class ModelRegistry:
-    _registry: dict[str, type[BaseNetwork]] = {}
+    _registry: dict[str, type[Model]] = {}
     _config_types: dict[str, type[BaseModelConfig]] = {}
 
     @classmethod
-    def register(cls, name: str, model_class: type[BaseNetwork], config_class: type[BaseModelConfig] | None = None) -> None:
-        if not isinstance(model_class, type) or not issubclass(model_class, BaseNetwork):
-            raise TypeError("Registered model must be a subclass of BaseNetwork.")
+    def register(cls, name: str, model_class: type[Model], config_class: type[BaseModelConfig] | None = None) -> None:
+        if not isinstance(model_class, type) or not issubclass(model_class, Model):
+            raise TypeError("Registered model must be a subclass of Model.")
         if name in cls._registry:
             raise ValueError(f"Model '{name}' is already registered.")
 
@@ -27,7 +27,7 @@ class ModelRegistry:
         cls._config_types[name] = config_class
 
     @classmethod
-    def get(cls, name: str) -> type[BaseNetwork]:
+    def get(cls, name: str) -> type[Model]:
         try:
             return cls._registry[name]
         except KeyError as exc:
@@ -46,7 +46,7 @@ class ModelRegistry:
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
         **kwargs: Any,
-    ) -> BaseNetwork:
+    ) -> Model:
         model_class = cls.get(name)
         config_type = cls.get_config_class(name)
 
@@ -62,7 +62,7 @@ class ModelRegistry:
         return model_class(config=config, inputs=inputs, outputs=outputs)
 
     @classmethod
-    def _infer_config_class(cls, model_class: type[BaseNetwork]) -> type[BaseModelConfig]:
+    def _infer_config_class(cls, model_class: type[Model]) -> type[BaseModelConfig]:
         try:
             signature = inspect.signature(model_class.__init__)
         except (TypeError, ValueError):
@@ -88,8 +88,8 @@ class ModelRegistry:
         return BaseModelConfig
 
 
-def create_model(config: dict[str, Any] | BaseModelConfig | str | None = None, **kwargs: Any) -> BaseNetwork:
-    if isinstance(config, BaseNetwork):
+def create_model(config: dict[str, Any] | BaseModelConfig | str | None = None, **kwargs: Any) -> Model:
+    if isinstance(config, Model):
         return config
     if isinstance(config, str):
         return ModelRegistry.create(config, **kwargs)

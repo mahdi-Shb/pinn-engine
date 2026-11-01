@@ -10,10 +10,10 @@ from typing import Sequence
 import torch
 from torch import nn
 
-from ..base import BaseNetwork
+from PINNCore import Model, check
+from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 from ..configs import BaseModelConfig
 from ..fno.components import FourierOperatorBlock3d, get_activation
-from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .components import KernelIntegralTransform
 
@@ -92,10 +92,16 @@ class GINOConfig(BaseModelConfig):
             raise ValueError(f"modes[2]={modes_w} exceeds latent W//2+1={width // 2 + 1}.")
 
 
-class GINO(BaseNetwork):
+class GINO(Model):
     """Geometry-aware point-to-grid, Fourier, and grid-to-point operator."""
 
     config_class = GINOConfig
+    vmap_randomness = "different"
+
+    @property
+    def signature(self):
+        return contract_signature(self)
+
     # Model.forward checkpoints the complete call after building its vmaps.
     # Inner kernel checkpoints stay off in evaluate to avoid nested transforms.
     checkpoint_batches = True
@@ -107,7 +113,9 @@ class GINO(BaseNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ) -> None:
-        super().__init__(config=config or GINOConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or GINOConfig()
+        initialize_contract(self, inputs, outputs)
         self.encoder = KernelIntegralTransform(
             self.config.input_dim,
             self.config.width,
@@ -131,82 +139,6 @@ class GINO(BaseNetwork):
         )
         self.output_projection = nn.Linear(self.config.width, self.config.output_dim)
 
-    @property
-    def required_inputs(self) -> set[str]:
-        return {"coordinates", "point_features"}
-
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return ModelCapabilities(
-            representation="POINT_CLOUD",
-            requires=set(self.required_inputs),
-            supports={"point_mask", "query_coordinates"},
-            variable_geometry=True,
-            variable_node_count=True,
-        )
-
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-        coordinates = self._ensure_tensor(inputs.coordinates, name="coordinates")
-        features = self._ensure_tensor(inputs.point_features, name="point_features")
-        if coordinates.ndim != 3 or coordinates.shape[-1] != 3:
-            raise ValueError(
-                "GINO coordinates must have shape [B, N, 3], "
-                f"got {tuple(coordinates.shape)}."
-            )
-        if coordinates.shape[1] == 0:
-            raise ValueError("Each source point cloud must contain at least one point.")
-        if not coordinates.is_floating_point():
-            raise TypeError("coordinates must use a floating-point dtype.")
-        expected_features = (*coordinates.shape[:2], self.config.input_dim)
-        if tuple(features.shape) != expected_features:
-            raise ValueError(
-                f"point_features must have shape {expected_features}, got {tuple(features.shape)}."
-            )
-        if not features.is_floating_point():
-            raise TypeError("point_features must use a floating-point dtype.")
-
-        if inputs.point_mask is None:
-            source_mask = torch.ones(coordinates.shape[:2], dtype=torch.bool, device=coordinates.device)
-        else:
-            source_mask = torch.as_tensor(inputs.point_mask, device=coordinates.device)
-            if tuple(source_mask.shape) != tuple(coordinates.shape[:2]):
-                raise ValueError(
-                    f"point_mask must have shape {tuple(coordinates.shape[:2])}, "
-                    f"got {tuple(source_mask.shape)}."
-                )
-            if source_mask.dtype != torch.bool:
-                raise TypeError("point_mask must use a boolean dtype.")
-        if not torch.all(source_mask.any(dim=1)):
-            raise ValueError("Every point cloud must contain at least one valid source point.")
-        if not torch.isfinite(coordinates[source_mask]).all():
-            raise ValueError("Valid source coordinates must be finite.")
-        if not torch.isfinite(features[source_mask]).all():
-            raise ValueError("Valid point_features must be finite.")
-        valid_source_coordinates = coordinates[source_mask]
-        if torch.any((valid_source_coordinates < 0.0) | (valid_source_coordinates > 1.0)):
-            raise ValueError("Valid source coordinates must be normalized to [0, 1].")
-
-        if inputs.query_coordinates is not None:
-            query_coordinates = self._ensure_tensor(
-                inputs.query_coordinates, name="query_coordinates"
-            )
-            if query_coordinates.ndim != 3 or query_coordinates.shape[-1] != 3:
-                raise ValueError(
-                    "query_coordinates must have shape [B, Q, 3], "
-                    f"got {tuple(query_coordinates.shape)}."
-                )
-            if query_coordinates.shape[0] != coordinates.shape[0]:
-                raise ValueError("query_coordinates batch size must match coordinates.")
-            if query_coordinates.shape[1] == 0:
-                raise ValueError("Each query set must contain at least one point.")
-            if not query_coordinates.is_floating_point():
-                raise TypeError("query_coordinates must use a floating-point dtype.")
-            if not torch.isfinite(query_coordinates).all():
-                raise ValueError("query_coordinates must be finite.")
-            if torch.any((query_coordinates < 0.0) | (query_coordinates > 1.0)):
-                raise ValueError("query_coordinates must be normalized to [0, 1].")
-        return True
 
     def _latent_coordinates(self, reference: torch.Tensor) -> torch.Tensor:
         axes = [
@@ -216,78 +148,153 @@ class GINO(BaseNetwork):
         grid = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1)
         return grid.reshape(-1, 3)
 
-    def _predict(self, inputs: ModelInput, *, use_checkpoint: bool = False) -> ModelOutput:
-        parameter = next(self.parameters())
-        coordinates = torch.as_tensor(
-            inputs.coordinates, device=parameter.device, dtype=parameter.dtype
-        )
-        features = torch.as_tensor(
-            inputs.point_features, device=parameter.device, dtype=parameter.dtype
-        )
-        source_mask = (
-            torch.ones(coordinates.shape[:2], dtype=torch.bool, device=parameter.device)
-            if inputs.point_mask is None
-            else torch.as_tensor(inputs.point_mask, device=parameter.device, dtype=torch.bool)
-        )
-        default_queries = inputs.query_coordinates is None
-        queries = coordinates if default_queries else torch.as_tensor(
-            inputs.query_coordinates, device=parameter.device, dtype=parameter.dtype
-        )
-        latent_coordinates = self._latent_coordinates(coordinates)
-        latent_batches = []
-
-        for batch_index in range(coordinates.shape[0]):
-            valid = source_mask[batch_index]
-            latent = self.encoder(
-                coordinates[batch_index],
-                latent_coordinates,
-                features[batch_index],
-                source_mask=valid,
-                use_checkpoint=use_checkpoint,
-            )
-            latent = latent.reshape(*self.config.latent_resolution, self.config.width)
-            latent_batches.append(latent.permute(3, 0, 1, 2))
-
-        latent_grid = torch.stack(latent_batches, dim=0)
-        for index, block in enumerate(self.blocks):
-            latent_grid = block(latent_grid)
-            if index < len(self.blocks) - 1:
-                latent_grid = self.activation(latent_grid)
-
-        flat_latent = latent_grid.permute(0, 2, 3, 4, 1).reshape(
-            coordinates.shape[0], -1, self.config.width
-        )
-        decoded_batches = []
-        for batch_index in range(coordinates.shape[0]):
-            query_mask = source_mask[batch_index] if default_queries else None
-            valid_queries = queries[batch_index]
-            if query_mask is not None:
-                valid_queries = torch.where(query_mask.unsqueeze(-1), valid_queries, 0.0)
-            decoded = self.decoder(
-                latent_coordinates,
-                valid_queries,
-                flat_latent[batch_index],
-                use_checkpoint=use_checkpoint,
-            )
-            projected = self.output_projection(decoded)
-            if query_mask is not None:
-                decoded_batches.append(projected.masked_fill(~query_mask.unsqueeze(-1), 0.0))
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            coordinates = inputs["coordinates"]
+            features = inputs["point_features"]
+            if coordinates.ndim != 3 or coordinates.shape[-1] != 3:
+                raise ValueError(
+                    f"GINO coordinates must have shape [B, N, 3], got {tuple(coordinates.shape)}."
+                )
+            if coordinates.shape[1] == 0:
+                raise ValueError("Each source point cloud must contain at least one point.")
+            if not coordinates.is_floating_point():
+                raise TypeError("coordinates must use a floating-point dtype.")
+            expected_features = (*coordinates.shape[:2], self.config.input_dim)
+            if tuple(features.shape) != expected_features:
+                raise ValueError(
+                    f"point_features must have shape {expected_features}, got {tuple(features.shape)}."
+                )
+            if not features.is_floating_point():
+                raise TypeError("point_features must use a floating-point dtype.")
+            if inputs.get("point_mask") is None:
+                source_mask = torch.ones(
+                    coordinates.shape[:2], dtype=torch.bool, device=coordinates.device
+                )
             else:
-                decoded_batches.append(projected)
-
-        predictions = torch.stack(decoded_batches, dim=0)
-        return ModelOutput(
-            predictions=predictions,
-            latent=latent_grid,
-            metadata={
-                "query_coordinates": queries,
-                "query_is_source": default_queries,
-                "point_mask": source_mask,
-                "latent_resolution": self.config.latent_resolution,
-            },
-        )
-
-    def predict(self, inputs: ModelInput) -> ModelOutput:
-        """Retain bounded-memory checkpointing outside functional transforms."""
-        self.validate_inputs(inputs)
-        return self._predict(inputs, use_checkpoint=True)
+                source_mask = torch.as_tensor(
+                    inputs.get("point_mask"), device=coordinates.device
+                )
+                if tuple(source_mask.shape) != tuple(coordinates.shape[:2]):
+                    raise ValueError(
+                        f"point_mask must have shape {tuple(coordinates.shape[:2])}, got {tuple(source_mask.shape)}."
+                    )
+                if source_mask.dtype != torch.bool:
+                    raise TypeError("point_mask must use a boolean dtype.")
+            check(
+                source_mask.any(dim=1),
+                "Every point cloud must contain at least one valid source point.",
+            )
+            valid_coordinates = torch.where(source_mask.unsqueeze(-1), coordinates, 0.0)
+            valid_features = torch.where(source_mask.unsqueeze(-1), features, 0.0)
+            check(
+                torch.isfinite(valid_coordinates),
+                "Valid source coordinates must be finite.",
+            )
+            check(torch.isfinite(valid_features), "Valid point_features must be finite.")
+            check(
+                (valid_coordinates >= 0) & (valid_coordinates <= 1),
+                "Valid source coordinates must be normalized to [0, 1].",
+            )
+            if inputs.get("query_coordinates") is not None:
+                query_coordinates = inputs.get("query_coordinates")
+                if query_coordinates.ndim != 3 or query_coordinates.shape[-1] != 3:
+                    raise ValueError(
+                        f"query_coordinates must have shape [B, Q, 3], got {tuple(query_coordinates.shape)}."
+                    )
+                if query_coordinates.shape[0] != coordinates.shape[0]:
+                    raise ValueError("query_coordinates batch size must match coordinates.")
+                if query_coordinates.shape[1] == 0:
+                    raise ValueError("Each query set must contain at least one point.")
+                if not query_coordinates.is_floating_point():
+                    raise TypeError("query_coordinates must use a floating-point dtype.")
+                check(
+                    torch.isfinite(query_coordinates).all(),
+                    "query_coordinates must be finite.",
+                )
+                check(
+                    ~torch.any((query_coordinates < 0.0) | (query_coordinates > 1.0)),
+                    "query_coordinates must be normalized to [0, 1].",
+                )
+            parameter = next(self.parameters())
+            coordinates = torch.as_tensor(
+                inputs["coordinates"], device=parameter.device, dtype=parameter.dtype
+            )
+            features = torch.as_tensor(
+                inputs["point_features"], device=parameter.device, dtype=parameter.dtype
+            )
+            source_mask = (
+                torch.ones(coordinates.shape[:2], dtype=torch.bool, device=parameter.device)
+                if inputs.get("point_mask") is None
+                else torch.as_tensor(
+                    inputs.get("point_mask"), device=parameter.device, dtype=torch.bool
+                )
+            )
+            default_queries = inputs.get("query_coordinates") is None
+            queries = (
+                coordinates
+                if default_queries
+                else torch.as_tensor(
+                    inputs.get("query_coordinates"),
+                    device=parameter.device,
+                    dtype=parameter.dtype,
+                )
+            )
+            latent_coordinates = self._latent_coordinates(coordinates)
+            latent_batches = []
+            for batch_index in range(coordinates.shape[0]):
+                valid = source_mask[batch_index]
+                latent = self.encoder(
+                    coordinates[batch_index],
+                    latent_coordinates,
+                    features[batch_index],
+                    source_mask=valid,
+                    use_checkpoint=False,
+                )
+                latent = latent.reshape(*self.config.latent_resolution, self.config.width)
+                latent_batches.append(latent.permute(3, 0, 1, 2))
+            latent_grid = torch.stack(latent_batches, dim=0)
+            for index, block in enumerate(self.blocks):
+                latent_grid = block(latent_grid)
+                if index < len(self.blocks) - 1:
+                    latent_grid = self.activation(latent_grid)
+            flat_latent = latent_grid.permute(0, 2, 3, 4, 1).reshape(
+                coordinates.shape[0], -1, self.config.width
+            )
+            decoded_batches = []
+            for batch_index in range(coordinates.shape[0]):
+                query_mask = source_mask[batch_index] if default_queries else None
+                valid_queries = queries[batch_index]
+                if query_mask is not None:
+                    valid_queries = torch.where(
+                        query_mask.unsqueeze(-1), valid_queries, 0.0
+                    )
+                decoded = self.decoder(
+                    latent_coordinates,
+                    valid_queries,
+                    flat_latent[batch_index],
+                    use_checkpoint=False,
+                )
+                projected = self.output_projection(decoded)
+                if query_mask is not None:
+                    decoded_batches.append(
+                        projected.masked_fill(~query_mask.unsqueeze(-1), 0.0)
+                    )
+                else:
+                    decoded_batches.append(projected)
+            predictions = torch.stack(decoded_batches, dim=0)
+            results.append(
+                {
+                    "predictions": predictions,
+                    "latent": latent_grid,
+                    "metadata": {
+                        "query_coordinates": queries,
+                        "query_is_source": default_queries,
+                        "point_mask": source_mask,
+                        "latent_resolution": self.config.latent_resolution,
+                    },
+                }
+            )
+        return finish_outputs(self, results, layout)

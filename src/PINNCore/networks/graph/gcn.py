@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from PINNCore.quantities import Quantity
+from PINNCore.model import Model
 
 import torch
 from torch import nn
 
 from ..configs import BaseModelConfig
-from ..types import ModelInput, ModelOutput
+from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 
-from .base import BaseGraphNetwork
 from .layers import GCNBlock
 
 
@@ -53,8 +53,13 @@ class GCNConfig(BaseModelConfig):
             raise ValueError(f"Unknown normalization '{self.normalization}'. Available: {sorted(valid_normalizations)}")
 
 
-class GCN(BaseGraphNetwork):
+class GCN(Model):
     config_class = GCNConfig
+    vmap_randomness = "different"
+
+    @property
+    def signature(self):
+        return contract_signature(self)
 
     def __init__(
         self,
@@ -63,7 +68,9 @@ class GCN(BaseGraphNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ):
-        super().__init__(config=config or GCNConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or GCNConfig()
+        initialize_contract(self, inputs, outputs)
 
         self.input_proj = nn.Linear(self.config.input_dim, self.config.hidden_dim)
 
@@ -84,25 +91,6 @@ class GCN(BaseGraphNetwork):
 
         self.output_proj = nn.Linear(self.config.hidden_dim, self.config.output_dim)
 
-    @property
-    def required_inputs(self) -> set[str]:
-        return {"node_features", "edge_index"}
-
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-
-        node_features = self._ensure_tensor(inputs.node_features, name="node_features")
-        if node_features.shape[1] != self.config.input_dim:
-            raise ValueError(
-                f"GCN expects input feature dimension {self.config.input_dim}, got {node_features.shape[1]}."
-            )
-
-        edge_index = self._ensure_tensor(inputs.edge_index, name="edge_index")
-        if edge_index.shape[0] != 2:
-            raise ValueError(f"edge_index must have shape [2, E], got {tuple(edge_index.shape)}.")
-
-        return True
-
     def _prepare_edge_index(self, edge_index: torch.Tensor, num_nodes: int) -> torch.Tensor:
         edge_index = torch.as_tensor(edge_index, dtype=torch.long, device=self.input_proj.weight.device)
         if edge_index.dim() != 2 or edge_index.shape[0] != 2:
@@ -114,13 +102,21 @@ class GCN(BaseGraphNetwork):
 
         return edge_index
 
-    def _predict(self, inputs: ModelInput) -> ModelOutput:
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            node_features = inputs["node_features"]
+            if node_features.shape[1] != self.config.input_dim:
+                raise ValueError(
+                    f"GCN expects input feature dimension {self.config.input_dim}, got {node_features.shape[1]}."
+                )
+            node_features = node_features.to(self.input_proj.weight.device)
+            edge_index = self._prepare_edge_index(inputs["edge_index"], node_features.size(0))
 
-        node_features = self._ensure_tensor(inputs.node_features, name="node_features").to(self.input_proj.weight.device)
-        edge_index = self._prepare_edge_index(inputs.edge_index, node_features.size(0))
-
-        hidden = self.input_proj(node_features)
-        for layer in self.layers:
-            hidden = layer(hidden, edge_index)
-        predictions = self.output_proj(hidden)
-        return ModelOutput(predictions=predictions)
+            hidden = self.input_proj(node_features)
+            for layer in self.layers:
+                hidden = layer(hidden, edge_index)
+            predictions = self.output_proj(hidden)
+            results.append({"predictions": predictions})
+        return finish_outputs(self, results, layout)

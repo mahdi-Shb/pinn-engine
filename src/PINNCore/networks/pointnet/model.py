@@ -8,9 +8,10 @@ from PINNCore.networks.normalization import normalization_mask, masked_point_inp
 
 import torch
 
-from ..base import BaseNetwork
+from PINNCore.model import Model
+from PINNCore.checks import check
+from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 from ..configs import BaseModelConfig
-from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .components import (
     PointNetClassificationHead,
@@ -57,10 +58,11 @@ class PointNetConfig(BaseModelConfig):
         return self.input_dim - 3
 
 
-class PointNet(BaseNetwork):
+class PointNet(Model):
     """PointNet for global classification and point-wise prediction."""
 
     config_class = PointNetConfig
+    vmap_randomness = "different"
 
     def __init__(
         self,
@@ -69,7 +71,9 @@ class PointNet(BaseNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ):
-        super().__init__(config=config or PointNetConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or PointNetConfig()
+        initialize_contract(self, inputs, outputs)
         self.encoder = PointNetEncoder(
             self.config.input_dim,
             self.config.global_dim,
@@ -93,89 +97,78 @@ class PointNet(BaseNetwork):
             )
 
     @property
-    def required_inputs(self) -> set[str]:
-        return {"coordinates"}
+    def signature(self):
+        return contract_signature(self)
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return ModelCapabilities(
-            representation="POINT_CLOUD",
-            requires={"coordinates"},
-            supports={"point_features", "point_mask"},
-            variable_geometry=True,
-            variable_node_count=True,
-        )
-
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-        points = self._ensure_tensor(inputs.coordinates, name="coordinates")
-        if points.ndim != 3 or points.shape[-1] != 3:
-            raise ValueError(
-                "PointNet coordinates must have shape [B, N, 3], "
-                f"got {tuple(points.shape)}."
-            )
-        if not points.is_floating_point():
-            raise TypeError("coordinates must use a floating-point dtype.")
-        if points.shape[1] < 1:
-            raise ValueError("Each point cloud must contain at least one point.")
-
-        expected_features = self.config.feature_dim
-        if inputs.point_features is None:
-            if expected_features:
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            points = inputs["coordinates"]
+            if points.ndim != 3 or points.shape[-1] != 3:
                 raise ValueError(
-                    f"PointNet expects {expected_features} additional point features."
+                    "PointNet coordinates must have shape [B, N, 3], "
+                    f"got {tuple(points.shape)}."
                 )
-        else:
-            features = self._ensure_tensor(inputs.point_features, name="point_features")
-            expected_shape = (*points.shape[:2], expected_features)
-            if tuple(features.shape) != expected_shape:
-                raise ValueError(
-                    f"point_features must have shape {expected_shape}, "
-                    f"got {tuple(features.shape)}."
-                )
-            if not features.is_floating_point():
-                raise TypeError("point_features must use a floating-point dtype.")
+            if not points.is_floating_point():
+                raise TypeError("coordinates must use a floating-point dtype.")
+            if points.shape[1] < 1:
+                raise ValueError("Each point cloud must contain at least one point.")
 
-        if inputs.point_mask is not None:
-            mask = torch.as_tensor(inputs.point_mask)
-            if tuple(mask.shape) != tuple(points.shape[:2]):
-                raise ValueError(
-                    f"point_mask must have shape {tuple(points.shape[:2])}, "
-                    f"got {tuple(mask.shape)}."
-                )
-            if mask.dtype != torch.bool:
-                raise TypeError("point_mask must use a boolean dtype.")
-            if not torch.all(mask.any(dim=1)):
-                raise ValueError("Every point cloud must contain at least one valid point.")
-        return True
-
-    def _predict(self, inputs: ModelInput) -> ModelOutput:
-        parameter = next(self.parameters())
-        points = torch.as_tensor(
-            inputs.coordinates, device=parameter.device, dtype=parameter.dtype
-        )
-        features = None
-        if inputs.point_features is not None:
-            features = torch.as_tensor(
-                inputs.point_features, device=parameter.device, dtype=parameter.dtype
-            )
-        mask = None
-        if inputs.point_mask is not None:
-            mask = torch.as_tensor(inputs.point_mask, device=parameter.device, dtype=torch.bool)
-
-        points, features = masked_point_inputs(points, features, mask)
-        with normalization_mask(mask, enabled=mask is not None):
-            local, global_feature, transforms = self.encoder(points, features, mask)
-            if self.config.task == "classification":
-                predictions = self.head(global_feature)
+            expected_features = self.config.feature_dim
+            if inputs.get("point_features") is None:
+                if expected_features:
+                    raise ValueError(
+                        f"PointNet expects {expected_features} additional point features."
+                    )
             else:
-                predictions = self.head(local, global_feature)
-                if mask is not None:
-                    predictions = predictions.masked_fill(~mask.unsqueeze(-1), 0.0)
+                features = inputs.get("point_features")
+                expected_shape = (*points.shape[:2], expected_features)
+                if tuple(features.shape) != expected_shape:
+                    raise ValueError(
+                        f"point_features must have shape {expected_shape}, "
+                        f"got {tuple(features.shape)}."
+                    )
+                if not features.is_floating_point():
+                    raise TypeError("point_features must use a floating-point dtype.")
 
-        return ModelOutput(
-            predictions=predictions,
-            latent=global_feature,
-            auxiliary=transforms,
-            metadata={"point_mask": mask} if mask is not None else {},
-        )
+            if inputs.get("point_mask") is not None:
+                mask = torch.as_tensor(inputs.get("point_mask"))
+                if tuple(mask.shape) != tuple(points.shape[:2]):
+                    raise ValueError(
+                        f"point_mask must have shape {tuple(points.shape[:2])}, "
+                        f"got {tuple(mask.shape)}."
+                    )
+                if mask.dtype != torch.bool:
+                    raise TypeError("point_mask must use a boolean dtype.")
+                check(mask.any(dim=1), "Every point cloud must contain at least one valid point.")
+
+            parameter = next(self.parameters())
+            points = torch.as_tensor(
+                inputs["coordinates"], device=parameter.device, dtype=parameter.dtype
+            )
+            features = None
+            if inputs.get("point_features") is not None:
+                features = torch.as_tensor(
+                    inputs.get("point_features"), device=parameter.device, dtype=parameter.dtype
+                )
+            mask = None
+            if inputs.get("point_mask") is not None:
+                mask = torch.as_tensor(inputs.get("point_mask"), device=parameter.device, dtype=torch.bool)
+
+            points, features = masked_point_inputs(points, features, mask)
+            with normalization_mask(mask, enabled=mask is not None):
+                local, global_feature, transforms = self.encoder(points, features, mask)
+                if self.config.task == "classification":
+                    predictions = self.head(global_feature)
+                else:
+                    predictions = self.head(local, global_feature)
+                    if mask is not None:
+                        predictions = predictions.masked_fill(~mask.unsqueeze(-1), 0.0)
+            results.append({
+                "predictions": predictions,
+                "latent": global_feature,
+                "auxiliary": transforms,
+                "metadata": {"point_mask": mask} if mask is not None else {},
+            })
+        return finish_outputs(self, results, layout)

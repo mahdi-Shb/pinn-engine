@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
-
-from PINNCore.quantities import Quantity
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-from ..base import BaseNetwork
+from PINNCore.model import Model
+from PINNCore.quantities import Quantity
+
+from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 from ..configs import BaseModelConfig
-from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .components import (
     FourierOperatorBlock3d,
@@ -75,10 +74,11 @@ class FNO3DConfig(BaseModelConfig):
             raise ValueError("dropout must be in [0, 1).")
 
 
-class FNO3D(BaseNetwork):
+class FNO3D(Model):
     """Fourier Neural Operator for dense fields on regular 3D grids."""
 
     config_class = FNO3DConfig
+    vmap_randomness = "different"
 
     def __init__(
         self,
@@ -87,7 +87,9 @@ class FNO3D(BaseNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ) -> None:
-        super().__init__(config=config or FNO3DConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or FNO3DConfig()
+        initialize_contract(self, inputs, outputs)
         lifted_channels = self.config.input_channels + (
             3 if self.config.append_coordinates else 0
         )
@@ -110,67 +112,58 @@ class FNO3D(BaseNetwork):
         )
 
     @property
-    def required_inputs(self) -> set[str]:
-        return {"voxel_fields"}
+    def signature(self):
+        return contract_signature(self)
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return ModelCapabilities(
-            representation="GRID",
-            requires={"voxel_fields"},
-            supports={"boundary_mask", "material_properties"},
-            variable_geometry=False,
-            variable_node_count=False,
-        )
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            volume = inputs["voxel_fields"]
+            if volume.ndim != 5:
+                raise ValueError(
+                    "FNO3D voxel_fields must have shape [B, C, D, H, W], "
+                    f"got {tuple(volume.shape)}."
+                )
+            if volume.shape[1] != self.config.input_channels:
+                raise ValueError(
+                    f"FNO3D expects {self.config.input_channels} input channels, "
+                    f"got {volume.shape[1]}."
+                )
+            if not volume.is_floating_point():
+                raise TypeError("voxel_fields must use a floating-point dtype.")
+            # Validate against the user-supplied grid, not an artificially enlarged
+            # padded grid, so incompatible data fails early and predictably.
+            self.blocks[0].spectral._validate_spatial_shape(volume.shape[-3:])
 
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-        volume = self._ensure_tensor(inputs.voxel_fields, name="voxel_fields")
-        if volume.ndim != 5:
-            raise ValueError(
-                "FNO3D voxel_fields must have shape [B, C, D, H, W], "
-                f"got {tuple(volume.shape)}."
+            parameter = next(self.parameters())
+            x = torch.as_tensor(
+                inputs.get("voxel_fields"), device=parameter.device, dtype=parameter.dtype
             )
-        if volume.shape[1] != self.config.input_channels:
-            raise ValueError(
-                f"FNO3D expects {self.config.input_channels} input channels, "
-                f"got {volume.shape[1]}."
-            )
-        if not volume.is_floating_point():
-            raise TypeError("voxel_fields must use a floating-point dtype.")
-        # Validate against the user-supplied grid, not an artificially enlarged
-        # padded grid, so incompatible data fails early and predictably.
-        self.blocks[0].spectral._validate_spatial_shape(volume.shape[-3:])
-        return True
+            original_shape = tuple(x.shape[-3:])
+            if self.config.append_coordinates:
+                x = torch.cat((x, normalized_coordinate_grid(x)), dim=1)
+            x = self.lifting(x)
 
-    def _predict(self, inputs: ModelInput) -> ModelOutput:
-        parameter = next(self.parameters())
-        x = torch.as_tensor(
-            inputs.voxel_fields, device=parameter.device, dtype=parameter.dtype
-        )
-        original_shape = tuple(x.shape[-3:])
-        if self.config.append_coordinates:
-            x = torch.cat((x, normalized_coordinate_grid(x)), dim=1)
-        x = self.lifting(x)
+            pad_d, pad_h, pad_w = self.config.padding
+            if any(self.config.padding):
+                # F.pad order is W, H, D. Padding is one-sided at the upper end.
+                x = F.pad(x, (0, pad_w, 0, pad_h, 0, pad_d), mode="constant", value=0.0)
+            for index, block in enumerate(self.blocks):
+                x = block(x)
+                if index < len(self.blocks) - 1:
+                    x = self.activation(x)
+            if any(self.config.padding):
+                depth, height, width = original_shape
+                x = x[..., :depth, :height, :width]
 
-        pad_d, pad_h, pad_w = self.config.padding
-        if any(self.config.padding):
-            # F.pad order is W, H, D. Padding is one-sided at the upper end.
-            x = F.pad(x, (0, pad_w, 0, pad_h, 0, pad_d), mode="constant", value=0.0)
-        for index, block in enumerate(self.blocks):
-            x = block(x)
-            if index < len(self.blocks) - 1:
-                x = self.activation(x)
-        if any(self.config.padding):
-            depth, height, width = original_shape
-            x = x[..., :depth, :height, :width]
-
-        predictions = self.projection(x)
-        return ModelOutput(
-            predictions=predictions,
-            latent=x,
-            metadata={
-                "spatial_shape": tuple(predictions.shape[-3:]),
-                "modes": self.config.modes,
-            },
-        )
+            predictions = self.projection(x)
+            results.append(dict(
+                predictions=predictions,
+                latent=x,
+                metadata={
+                    "spatial_shape": tuple(predictions.shape[-3:]),
+                    "modes": self.config.modes,
+                },
+            ))
+        return finish_outputs(self, results, layout)

@@ -170,10 +170,12 @@ See [the derivative contract](docs/contracts.fa.md) for details and limitations.
 Geometry/domain interfaces are deferred; the GeoCore and field-domain ideas are
 recorded in [the design notes](docs/architecture_open_decisions.fa.md).
 
-The eleven Neural3DBench networks are native `Model` subclasses under
-`PINNCore.networks`, installed with the engine. Their constructors accept
-`inputs={role: quantity}` and `outputs={role: quantity}`. Actual BatchNorm modules
-consume the complete batch; graph networks pack disjoint meshes internally.
+The eleven Neural3DBench networks inherit directly from `Model` under
+`PINNCore.networks`. Each defines its own `signature` and `evaluate`; there is
+no `BaseNetwork`, `BaseGraphNetwork`, or `predict` API. Constructors accept
+`inputs={role: quantity}` and `outputs={role: quantity}`. Value-dependent checks
+run inside `evaluate` using `check`. Shared helpers handle layouts and graph
+packing; actual BatchNorm modules consume the complete batch.
 PointNet and PointNet++ with BatchNorm require Tensor inputs and reject lists,
 including equal-sized lists and eval mode; they never pad lists automatically.
 Other networks use the engine's named-axis automatic batching. See

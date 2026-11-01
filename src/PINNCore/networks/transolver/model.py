@@ -3,14 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from PINNCore.quantities import Quantity
-
 import torch
 from torch import nn
 
-from ..base import BaseNetwork
+from PINNCore.model import Model
+from PINNCore.quantities import Quantity
+from PINNCore.checks import check
+
+from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 from ..configs import BaseModelConfig
-from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .block import TransolverBlock
 from .components import InputEmbedding, OutputHead
@@ -52,10 +53,11 @@ class TransolverConfig(BaseModelConfig):
             raise ValueError("activation must be gelu, relu, silu, or tanh.")
 
 
-class Transolver(BaseNetwork):
+class Transolver(Model):
     """Transolver for point-wise physical-field prediction on irregular domains."""
 
     config_class = TransolverConfig
+    vmap_randomness = "different"
 
     def __init__(
         self,
@@ -64,7 +66,9 @@ class Transolver(BaseNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ) -> None:
-        super().__init__(config=config or TransolverConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or TransolverConfig()
+        initialize_contract(self, inputs, outputs)
         self.input_embedding = InputEmbedding(
             self.config.spatial_dim,
             self.config.input_dim,
@@ -99,80 +103,70 @@ class Transolver(BaseNetwork):
             nn.init.zeros_(module.bias)
 
     @property
-    def required_inputs(self) -> set[str]:
-        return {"coordinates"}
+    def signature(self):
+        return contract_signature(self)
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return ModelCapabilities(
-            representation="POINT_CLOUD",
-            requires={"coordinates"},
-            supports={"point_features", "point_mask"},
-            variable_geometry=True,
-            variable_node_count=True,
-        )
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            coordinates = inputs["coordinates"]
+            if coordinates.ndim != 3 or coordinates.shape[-1] != self.config.spatial_dim:
+                raise ValueError(
+                    f"coordinates must have shape [B, N, {self.config.spatial_dim}], "
+                    f"got {tuple(coordinates.shape)}."
+                )
+            if not coordinates.is_floating_point():
+                raise TypeError("coordinates must use a floating-point dtype.")
+            if coordinates.shape[1] < 1:
+                raise ValueError("Each sample must contain at least one point.")
+            if self.config.input_dim:
+                if inputs.get("point_features") is None:
+                    raise ValueError(f"Transolver expects {self.config.input_dim} point features.")
+                features = inputs["point_features"]
+                expected = (*coordinates.shape[:2], self.config.input_dim)
+                if tuple(features.shape) != expected:
+                    raise ValueError(f"point_features must have shape {expected}.")
+                if not features.is_floating_point():
+                    raise TypeError("point_features must use a floating-point dtype.")
+            elif inputs.get("point_features") is not None:
+                features = inputs["point_features"]
+                if features.shape[-1] != 0:
+                    raise ValueError("Set input_dim to use point_features.")
+            if inputs.get("point_mask") is not None:
+                mask = torch.as_tensor(inputs.get("point_mask"))
+                if tuple(mask.shape) != tuple(coordinates.shape[:2]) or mask.dtype != torch.bool:
+                    raise ValueError("point_mask must be boolean with shape [B, N].")
+                check(mask.any(dim=1), "Every sample must contain at least one valid point.")
 
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-        coordinates = self._ensure_tensor(inputs.coordinates, name="coordinates")
-        if coordinates.ndim != 3 or coordinates.shape[-1] != self.config.spatial_dim:
-            raise ValueError(
-                f"coordinates must have shape [B, N, {self.config.spatial_dim}], "
-                f"got {tuple(coordinates.shape)}."
+            parameter = next(self.parameters())
+            coordinates = torch.as_tensor(
+                inputs.get("coordinates"), device=parameter.device, dtype=parameter.dtype
             )
-        if not coordinates.is_floating_point():
-            raise TypeError("coordinates must use a floating-point dtype.")
-        if coordinates.shape[1] < 1:
-            raise ValueError("Each sample must contain at least one point.")
-        if self.config.input_dim:
-            if inputs.point_features is None:
-                raise ValueError(f"Transolver expects {self.config.input_dim} point features.")
-            features = self._ensure_tensor(inputs.point_features, name="point_features")
-            expected = (*coordinates.shape[:2], self.config.input_dim)
-            if tuple(features.shape) != expected:
-                raise ValueError(f"point_features must have shape {expected}.")
-            if not features.is_floating_point():
-                raise TypeError("point_features must use a floating-point dtype.")
-        elif inputs.point_features is not None:
-            features = self._ensure_tensor(inputs.point_features, name="point_features")
-            if features.shape[-1] != 0:
-                raise ValueError("Set input_dim to use point_features.")
-        if inputs.point_mask is not None:
-            mask = torch.as_tensor(inputs.point_mask)
-            if tuple(mask.shape) != tuple(coordinates.shape[:2]) or mask.dtype != torch.bool:
-                raise ValueError("point_mask must be boolean with shape [B, N].")
-            if not torch.all(mask.any(dim=1)):
-                raise ValueError("Every sample must contain at least one valid point.")
-        return True
+            features = None if inputs.get("point_features") is None else torch.as_tensor(
+                inputs.get("point_features"), device=parameter.device, dtype=parameter.dtype
+            )
+            mask = None if inputs.get("point_mask") is None else torch.as_tensor(
+                inputs.get("point_mask"), device=parameter.device, dtype=torch.bool
+            )
+            hidden = self.input_embedding(coordinates, features) + self.placeholder
+            if mask is not None:
+                hidden = hidden.masked_fill(~mask.unsqueeze(-1), 0.0)
 
-    def _predict(self, inputs: ModelInput) -> ModelOutput:
-        parameter = next(self.parameters())
-        coordinates = torch.as_tensor(
-            inputs.coordinates, device=parameter.device, dtype=parameter.dtype
-        )
-        features = None if inputs.point_features is None else torch.as_tensor(
-            inputs.point_features, device=parameter.device, dtype=parameter.dtype
-        )
-        mask = None if inputs.point_mask is None else torch.as_tensor(
-            inputs.point_mask, device=parameter.device, dtype=torch.bool
-        )
-        hidden = self.input_embedding(coordinates, features) + self.placeholder
-        if mask is not None:
-            hidden = hidden.masked_fill(~mask.unsqueeze(-1), 0.0)
-
-        attention_data = []
-        for block in self.blocks:
-            if self.config.return_attention_weights:
-                hidden, block_data = block(hidden, mask, return_attention=True)
-                attention_data.append(block_data)
-            else:
-                hidden = block(hidden, mask)
-        predictions = self.output_head(hidden)
-        if mask is not None:
-            predictions = predictions.masked_fill(~mask.unsqueeze(-1), 0.0)
-        return ModelOutput(
-            predictions=predictions,
-            latent=hidden,
-            auxiliary={"physics_attention": attention_data} if attention_data else {},
-            metadata={"point_mask": mask} if mask is not None else {},
-        )
+            attention_data = []
+            for block in self.blocks:
+                if self.config.return_attention_weights:
+                    hidden, block_data = block(hidden, mask, return_attention=True)
+                    attention_data.append(block_data)
+                else:
+                    hidden = block(hidden, mask)
+            predictions = self.output_head(hidden)
+            if mask is not None:
+                predictions = predictions.masked_fill(~mask.unsqueeze(-1), 0.0)
+            results.append(dict(
+                predictions=predictions,
+                latent=hidden,
+                auxiliary={"physics_attention": attention_data} if attention_data else {},
+                metadata={"point_mask": mask} if mask is not None else {},
+            ))
+        return finish_outputs(self, results, layout)

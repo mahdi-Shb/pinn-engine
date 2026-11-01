@@ -9,9 +9,9 @@ from PINNCore.quantities import Quantity
 import torch
 from torch import nn
 
-from ..base import BaseNetwork
+from PINNCore import Model, check
+from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 from ..configs import BaseModelConfig
-from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 
 def _positive_int(value: int, name: str) -> int:
@@ -233,10 +233,15 @@ def _bspline_basis(
     return basis
 
 
-class DeepNURBS(BaseNetwork):
+class DeepNURBS(Model):
     """NURBS-admissible neural approximation on a 2D parametric surface."""
 
     config_class = DeepNURBSConfig
+    vmap_randomness = "different"
+
+    @property
+    def signature(self):
+        return contract_signature(self)
 
     def __init__(
         self,
@@ -245,7 +250,9 @@ class DeepNURBS(BaseNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ) -> None:
-        super().__init__(config=config or DeepNURBSConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or DeepNURBSConfig()
+        initialize_contract(self, inputs, outputs)
         control_points = torch.tensor(self.config.control_points, dtype=torch.float32)
         weights = torch.tensor(self.config.weights, dtype=torch.float32)
         admissible = torch.tensor(
@@ -268,37 +275,6 @@ class DeepNURBS(BaseNetwork):
             input_dim = self.config.hidden_dim
         self.output_layer = nn.Linear(input_dim, self.config.output_dim)
 
-    @property
-    def required_inputs(self) -> set[str]:
-        return {"coordinates"}
-
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return ModelCapabilities(
-            representation="PARAMETRIC_SURFACE",
-            requires=set(self.required_inputs),
-            supports=set(),
-            variable_geometry=False,
-            variable_node_count=True,
-        )
-
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-        coordinates = self._ensure_tensor(inputs.coordinates, name="coordinates")
-        if coordinates.ndim != 3 or coordinates.shape[-1] != 2:
-            raise ValueError(
-                "DeepNURBS coordinates must have shape [B, N, 2], "
-                f"got {tuple(coordinates.shape)}."
-            )
-        if coordinates.shape[0] == 0 or coordinates.shape[1] == 0:
-            raise ValueError("coordinates must contain at least one batch and one point.")
-        if not coordinates.is_floating_point():
-            raise TypeError("coordinates must use a floating-point dtype.")
-        if not torch.isfinite(coordinates).all():
-            raise ValueError("coordinates must be finite.")
-        if torch.any((coordinates < 0.0) | (coordinates > 1.0)):
-            raise ValueError("parametric coordinates must lie in [0, 1].")
-        return True
 
     def _evaluate_nurbs(
         self, parametric_coordinates: torch.Tensor
@@ -331,30 +307,52 @@ class DeepNURBS(BaseNetwork):
         )
         return physical_coordinates, admissible_field, lifting_field
 
-    def _predict(self, inputs: ModelInput) -> ModelOutput:
-        parameter = next(self.parameters())
-        parametric_coordinates = torch.as_tensor(
-            inputs.coordinates, device=parameter.device, dtype=parameter.dtype
-        )
-        physical_coordinates, admissible_field, lifting_field = self._evaluate_nurbs(
-            parametric_coordinates
-        )
-        neural_field = physical_coordinates
-        for layer in self.hidden_layers:
-            neural_field = layer(neural_field)
-            if self.config.activation == "cubic_relu":
-                neural_field = torch.relu(neural_field).pow(3)
-            else:
-                neural_field = torch.tanh(neural_field)
-        neural_field = self.output_layer(neural_field)
-        predictions = admissible_field * neural_field + lifting_field
-        return ModelOutput(
-            predictions=predictions,
-            latent=neural_field,
-            metadata={
-                "parametric_coordinates": parametric_coordinates,
-                "physical_coordinates": physical_coordinates,
-                "admissible_field": admissible_field,
-                "lifting_field": lifting_field,
-            },
-        )
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            coordinates = inputs["coordinates"]
+            if coordinates.ndim != 3 or coordinates.shape[-1] != 2:
+                raise ValueError(
+                    f"DeepNURBS coordinates must have shape [B, N, 2], got {tuple(coordinates.shape)}."
+                )
+            if coordinates.shape[0] == 0 or coordinates.shape[1] == 0:
+                raise ValueError(
+                    "coordinates must contain at least one batch and one point."
+                )
+            if not coordinates.is_floating_point():
+                raise TypeError("coordinates must use a floating-point dtype.")
+            check(torch.isfinite(coordinates).all(), "coordinates must be finite.")
+            check(
+                ~torch.any((coordinates < 0.0) | (coordinates > 1.0)),
+                "parametric coordinates must lie in [0, 1].",
+            )
+            parameter = next(self.parameters())
+            parametric_coordinates = torch.as_tensor(
+                inputs["coordinates"], device=parameter.device, dtype=parameter.dtype
+            )
+            physical_coordinates, admissible_field, lifting_field = self._evaluate_nurbs(
+                parametric_coordinates
+            )
+            neural_field = physical_coordinates
+            for layer in self.hidden_layers:
+                neural_field = layer(neural_field)
+                if self.config.activation == "cubic_relu":
+                    neural_field = torch.relu(neural_field).pow(3)
+                else:
+                    neural_field = torch.tanh(neural_field)
+            neural_field = self.output_layer(neural_field)
+            predictions = admissible_field * neural_field + lifting_field
+            results.append(
+                {
+                    "predictions": predictions,
+                    "latent": neural_field,
+                    "metadata": {
+                        "parametric_coordinates": parametric_coordinates,
+                        "physical_coordinates": physical_coordinates,
+                        "admissible_field": admissible_field,
+                        "lifting_field": lifting_field,
+                    },
+                }
+            )
+        return finish_outputs(self, results, layout)

@@ -605,3 +605,8 @@ setuptools اکنون پکیج‌ها را مستقیماً از src پیدا م
 ## بررسی مقدار داخل evaluate با check — ۲۰۲۶-۱۱-۰۱
 
 تابع عمومی `check(condition, message)` یک Tensor بولی می‌گیرد و اگر حتی یک عضو False باشد ValueError می‌دهد. قانون اختصاصی vmap اجازه می‌دهد آن را داخل evaluate بدون دریافت محورهای batch بنویسیم؛ vmap تودرتو نیز پشتیبانی می‌شود و شکست هر نمونه کل فراخوانی را متوقف می‌کند. بنابراین برای این نوع assertion، داشتن validate جدا یا مصرف کل batch الزامی نیست؛ if پایتونیِ وابسته به مقدار Tensor همچنان محدودیت vmap را دارد. این تصمیم فقط helper بررسی را اضافه می‌کند؛ حذف BaseNetwork و بازطراحی رابط شبکه‌ها هنوز پیاده نشده است. قرارداد فعلی برای اجرای eager است؛ سازگاری torch.compile تضمین نشده و بررسی مقدار CUDA نیازمند همگام‌سازی با میزبان است. مثال کوتاه در [راهنمای Signature](signature.fa.md#بررسی-مقدار-داخل-evaluate) آمده است.
+
+
+## شبکه‌های مستقیم Model — ۲۰۲۶-۱۱-۰۱
+
+BaseNetwork و BaseGraphNetwork حذف شدند. هر ۱۱ شبکه مستقیماً Model است و signature و evaluate خودش را دارد؛ predict، _predict و forward اختصاصیِ تبدیل رابط حذف شدند. محاسبات و اعتبارسنجی داخل evaluate همان شبکه‌اند؛ شرط‌های وابسته به مقدار با check و شرط‌های شکل/dtype به‌صورت معمول بررسی می‌شوند. prepare_inputs و finish_outputs فقط تبدیل layout، batch و packing گراف را مشترک می‌کنند. ModelInput/Output و adapterهای قدیمی مرجع داده‌اند و رابط اجرای شبکه نیستند. پارامترها، normalization، منع لیست در PointNetهای دارای BatchNorm و checkpoint بیرون vmap برای GINO حفظ شدند.

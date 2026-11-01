@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from PINNCore.quantities import Quantity
+from PINNCore.model import Model
 
 import torch
 from torch import nn
 
 from ..configs import BaseModelConfig
-from ..types import ModelInput, ModelOutput
+from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 
-from .base import BaseGraphNetwork
 from .layers import GATBlock
 
 
@@ -82,10 +82,15 @@ class GATConfig(BaseModelConfig):
             )
 
 
-class GAT(BaseGraphNetwork):
+class GAT(Model):
     """Node-level Graph Attention Network with a fixed-width hidden state."""
 
     config_class = GATConfig
+    vmap_randomness = "different"
+
+    @property
+    def signature(self):
+        return contract_signature(self)
 
     def __init__(
         self,
@@ -94,7 +99,9 @@ class GAT(BaseGraphNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ):
-        super().__init__(config=config or GATConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or GATConfig()
+        initialize_contract(self, inputs, outputs)
         self.input_proj = nn.Linear(self.config.input_dim, self.config.hidden_dim)
         self.layers = nn.ModuleList(
             GATBlock(
@@ -116,22 +123,6 @@ class GAT(BaseGraphNetwork):
         )
         self.output_proj = nn.Linear(self.config.hidden_dim, self.config.output_dim)
 
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-        node_features = self._ensure_tensor(inputs.node_features, name="node_features")
-        if not node_features.is_floating_point():
-            raise TypeError("node_features must use a floating-point dtype.")
-        if node_features.shape[1] != self.config.input_dim:
-            raise ValueError(
-                f"GAT expects input feature dimension {self.config.input_dim}, "
-                f"got {node_features.shape[1]}."
-            )
-
-        edge_index = self._ensure_tensor(inputs.edge_index, name="edge_index")
-        if edge_index.dtype == torch.bool or edge_index.is_floating_point() or edge_index.is_complex():
-            raise TypeError("edge_index must use an integer dtype.")
-        return True
-
     def _prepare_edge_index(self, edge_index: torch.Tensor, num_nodes: int) -> torch.Tensor:
         edge_index = torch.as_tensor(
             edge_index,
@@ -148,36 +139,48 @@ class GAT(BaseGraphNetwork):
         self_loops = torch.stack((nodes, nodes), dim=0)
         return torch.cat((non_loop_edges, self_loops), dim=1)
 
-    def _predict(self, inputs: ModelInput) -> ModelOutput:
-        node_features = self._ensure_tensor(inputs.node_features, name="node_features").to(
-            device=self.input_proj.weight.device,
-            dtype=self.input_proj.weight.dtype,
-        )
-        edge_index = self._prepare_edge_index(inputs.edge_index, node_features.size(0))
-
-        hidden = self.input_proj(node_features)
-        attention_weights = [] if self.config.return_attention_weights else None
-        for layer in self.layers:
-            if attention_weights is None:
-                hidden = layer(hidden, edge_index)
-            else:
-                hidden, coefficients = layer(
-                    hidden,
-                    edge_index,
-                    return_attention_weights=True,
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            node_features = inputs["node_features"]
+            if not node_features.is_floating_point():
+                raise TypeError("node_features must use a floating-point dtype.")
+            if node_features.shape[1] != self.config.input_dim:
+                raise ValueError(
+                    f"GAT expects input feature dimension {self.config.input_dim}, "
+                    f"got {node_features.shape[1]}."
                 )
-                attention_weights.append(
-                    {"edge_index": edge_index, "coefficients": coefficients}
-                )
+            node_features = node_features.to(
+                device=self.input_proj.weight.device,
+                dtype=self.input_proj.weight.dtype,
+            )
+            edge_index = self._prepare_edge_index(inputs["edge_index"], node_features.size(0))
 
-        predictions = self.output_proj(hidden)
-        auxiliary = None
-        if attention_weights is not None:
-            auxiliary = {"attention_weights": attention_weights}
-        metadata = {"batch": inputs.batch} if inputs.batch is not None else {}
-        return ModelOutput(
-            predictions=predictions,
-            latent=hidden,
-            auxiliary=auxiliary,
-            metadata=metadata,
-        )
+            hidden = self.input_proj(node_features)
+            attention_weights = [] if self.config.return_attention_weights else None
+            for layer in self.layers:
+                if attention_weights is None:
+                    hidden = layer(hidden, edge_index)
+                else:
+                    hidden, coefficients = layer(
+                        hidden,
+                        edge_index,
+                        return_attention_weights=True,
+                    )
+                    attention_weights.append(
+                        {"edge_index": edge_index, "coefficients": coefficients}
+                    )
+
+            predictions = self.output_proj(hidden)
+            auxiliary = None
+            if attention_weights is not None:
+                auxiliary = {"attention_weights": attention_weights}
+            metadata = {"batch": inputs["batch"]} if inputs.get("batch") is not None else {}
+            results.append({
+                "predictions": predictions,
+                "latent": hidden,
+                "auxiliary": auxiliary,
+                "metadata": metadata,
+            })
+        return finish_outputs(self, results, layout)

@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 import torch
 from torch import nn
+from PINNCore.checks import check
 from PINNCore.networks.normalization import BatchNorm2d, normalization_mask, has_normalization_mask
 
 
@@ -44,7 +45,7 @@ def farthest_point_sample(
             (batch_size, point_count), dtype=torch.bool, device=points.device
         )
     valid_counts = mask.sum(dim=1)
-    # The public model entry validates nonempty masks before vmap starts.
+    check(valid_counts > 0, "Every point cloud must contain at least one valid point.")
 
     centroid = (points * mask.unsqueeze(-1)).sum(dim=1) / valid_counts.unsqueeze(-1)
     initial_distance = (points - centroid.unsqueeze(1)).square().sum(dim=-1)

@@ -1,4 +1,3 @@
-from .base import BaseNetwork
 from .configs import BaseModelConfig
 from .deep_nurbs import DeepNURBS, DeepNURBSConfig
 from .fno import FNO3D, FNO3DConfig, SpectralConv3d
@@ -22,7 +21,6 @@ from .types import ModelCapabilities, ModelInput, ModelOutput
 
 __all__ = [
     "BaseModelConfig",
-    "BaseNetwork",
     "CoordinateRepresentationAdapter",
     "DeepNURBS",
     "DeepNURBSConfig",

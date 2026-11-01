@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from PINNCore.quantities import Quantity
+from PINNCore.model import Model
 
 import torch
 
 from ...configs import BaseModelConfig
-from ...types import ModelInput, ModelOutput
+from ..._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 
-from ..base import BaseGraphNetwork
 from .decoder import MeshGraphNetDecoder
 from .encoder import MeshGraphNetEncoder
 from .processor import MeshGraphNetProcessor
@@ -66,7 +66,7 @@ class MeshGraphNetConfig(BaseModelConfig):
             )
 
 
-class MeshGraphNet(BaseGraphNetwork):
+class MeshGraphNet(Model):
     """Encode-process-decode graph network for per-node physical predictions.
 
     Architectural decisions follow Pfaff et al. (ICLR 2021), DeepMind's
@@ -78,6 +78,11 @@ class MeshGraphNet(BaseGraphNetwork):
     """
 
     config_class = MeshGraphNetConfig
+    vmap_randomness = "different"
+
+    @property
+    def signature(self):
+        return contract_signature(self)
 
     def __init__(
         self,
@@ -86,7 +91,9 @@ class MeshGraphNet(BaseGraphNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ) -> None:
-        super().__init__(config=config or MeshGraphNetConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or MeshGraphNetConfig()
+        initialize_contract(self, inputs, outputs)
         common = {
             "mlp_hidden_dim": self.config.mlp_hidden_dim,
             "mlp_layers": self.config.mlp_layers,
@@ -112,64 +119,51 @@ class MeshGraphNet(BaseGraphNetwork):
             **common,
         )
 
-    @property
-    def required_inputs(self) -> set[str]:
-        return {"node_features", "edge_index", "edge_features"}
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            node_features = inputs["node_features"]
+            edge_features = inputs["edge_features"]
+            edge_index = inputs["edge_index"]
+            if not node_features.is_floating_point():
+                raise TypeError("node_features must use a floating-point dtype.")
+            if node_features.shape[1] != self.config.node_input_dim:
+                raise ValueError(
+                    "MeshGraphNet expects node feature dimension "
+                    f"{self.config.node_input_dim}, got {node_features.shape[1]}."
+                )
+            if edge_features.dim() != 2:
+                raise ValueError(
+                    f"edge_features must have shape [E, F_edge], got {tuple(edge_features.shape)}."
+                )
+            if not edge_features.is_floating_point():
+                raise TypeError("edge_features must use a floating-point dtype.")
+            if edge_features.shape[0] != edge_index.shape[1]:
+                raise ValueError(
+                    "edge_features and edge_index must describe the same number of edges: "
+                    f"got {edge_features.shape[0]} and {edge_index.shape[1]}."
+                )
+            if edge_features.shape[1] != self.config.edge_input_dim:
+                raise ValueError(
+                    "MeshGraphNet expects edge feature dimension "
+                    f"{self.config.edge_input_dim}, got {edge_features.shape[1]}."
+                )
+            parameter = next(self.parameters())
+            node_features = node_features.to(device=parameter.device, dtype=parameter.dtype)
+            edge_features = edge_features.to(device=parameter.device, dtype=parameter.dtype)
+            edge_index = edge_index.to(device=parameter.device, dtype=torch.long)
 
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-        node_features = self._ensure_tensor(inputs.node_features, name="node_features")
-        edge_features = self._ensure_tensor(inputs.edge_features, name="edge_features")
-        edge_index = self._ensure_tensor(inputs.edge_index, name="edge_index")
-
-        if not node_features.is_floating_point():
-            raise TypeError("node_features must use a floating-point dtype.")
-        if node_features.shape[1] != self.config.node_input_dim:
-            raise ValueError(
-                "MeshGraphNet expects node feature dimension "
-                f"{self.config.node_input_dim}, got {node_features.shape[1]}."
+            node_latent, edge_latent = self.encoder(node_features, edge_features)
+            node_latent, edge_latent = self.processor(
+                node_latent, edge_latent, edge_index
             )
-        if edge_features.dim() != 2:
-            raise ValueError(
-                f"edge_features must have shape [E, F_edge], got {tuple(edge_features.shape)}."
-            )
-        if not edge_features.is_floating_point():
-            raise TypeError("edge_features must use a floating-point dtype.")
-        if edge_features.shape[0] != edge_index.shape[1]:
-            raise ValueError(
-                "edge_features and edge_index must describe the same number of edges: "
-                f"got {edge_features.shape[0]} and {edge_index.shape[1]}."
-            )
-        if edge_features.shape[1] != self.config.edge_input_dim:
-            raise ValueError(
-                "MeshGraphNet expects edge feature dimension "
-                f"{self.config.edge_input_dim}, got {edge_features.shape[1]}."
-            )
-        if edge_index.dtype == torch.bool or edge_index.is_floating_point() or edge_index.is_complex():
-            raise TypeError("edge_index must use an integer dtype.")
-        return True
-
-    def _predict(self, inputs: ModelInput) -> ModelOutput:
-        parameter = next(self.parameters())
-        node_features = self._ensure_tensor(
-            inputs.node_features, name="node_features"
-        ).to(device=parameter.device, dtype=parameter.dtype)
-        edge_features = self._ensure_tensor(
-            inputs.edge_features, name="edge_features"
-        ).to(device=parameter.device, dtype=parameter.dtype)
-        edge_index = torch.as_tensor(
-            inputs.edge_index, device=parameter.device, dtype=torch.long
-        )
-
-        node_latent, edge_latent = self.encoder(node_features, edge_features)
-        node_latent, edge_latent = self.processor(
-            node_latent, edge_latent, edge_index
-        )
-        predictions = self.decoder(node_latent)
-        metadata = {"batch": inputs.batch} if inputs.batch is not None else {}
-        return ModelOutput(
-            predictions=predictions,
-            latent=node_latent,
-            auxiliary={"edge_latent": edge_latent},
-            metadata=metadata,
-        )
+            predictions = self.decoder(node_latent)
+            metadata = {"batch": inputs["batch"]} if inputs.get("batch") is not None else {}
+            results.append({
+                "predictions": predictions,
+                "latent": node_latent,
+                "auxiliary": {"edge_latent": edge_latent},
+                "metadata": metadata,
+            })
+        return finish_outputs(self, results, layout)

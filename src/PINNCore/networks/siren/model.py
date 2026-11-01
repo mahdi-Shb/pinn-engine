@@ -4,14 +4,15 @@ import math
 from dataclasses import dataclass
 from typing import Mapping
 
-from PINNCore.quantities import Quantity
-
 import torch
 from torch import nn
 
-from ..base import BaseNetwork
+from PINNCore.model import Model
+from PINNCore.quantities import Quantity
+from PINNCore.checks import check
+
+from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 from ..configs import BaseModelConfig
-from ..types import ModelCapabilities, ModelInput, ModelOutput
 
 from .layers import SineLayer
 
@@ -47,10 +48,11 @@ class SIRENConfig(BaseModelConfig):
             raise TypeError("outermost_linear must be boolean.")
 
 
-class SIREN(BaseNetwork):
+class SIREN(Model):
     """Pointwise sinusoidal representation network for continuous fields."""
 
     config_class = SIRENConfig
+    vmap_randomness = "different"
 
     def __init__(
         self,
@@ -59,7 +61,9 @@ class SIREN(BaseNetwork):
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ) -> None:
-        super().__init__(config=config or SIRENConfig(), inputs=inputs, outputs=outputs)
+        super().__init__()
+        self.config = config or SIRENConfig()
+        initialize_contract(self, inputs, outputs)
         total_input_dim = self.config.spatial_dim + self.config.input_dim
         self.first_layer = SineLayer(
             total_input_dim,
@@ -83,89 +87,79 @@ class SIREN(BaseNetwork):
             self.output_layer.weight.uniform_(-output_bound, output_bound)
 
     @property
-    def required_inputs(self) -> set[str]:
-        return {"coordinates"}
+    def signature(self):
+        return contract_signature(self)
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return ModelCapabilities(
-            representation="POINT_CLOUD",
-            requires={"coordinates"},
-            supports={"point_features", "point_mask"},
-            variable_geometry=True,
-            variable_node_count=True,
-        )
-
-    def validate_inputs(self, inputs: ModelInput) -> bool:
-        super().validate_inputs(inputs)
-        coordinates = self._ensure_tensor(inputs.coordinates, name="coordinates")
-        if coordinates.ndim != 3 or coordinates.shape[-1] != self.config.spatial_dim:
-            raise ValueError(
-                f"coordinates must have shape [B, N, {self.config.spatial_dim}], "
-                f"got {tuple(coordinates.shape)}."
-            )
-        if not coordinates.is_floating_point():
-            raise TypeError("coordinates must use a floating-point dtype.")
-        if coordinates.shape[0] < 1 or coordinates.shape[1] < 1:
-            raise ValueError("Every sample must contain at least one point.")
-
-        if self.config.input_dim > 0:
-            if inputs.point_features is None:
-                raise ValueError(f"SIREN expects {self.config.input_dim} point features.")
-            features = self._ensure_tensor(inputs.point_features, name="point_features")
-            expected = (*coordinates.shape[:2], self.config.input_dim)
-            if tuple(features.shape) != expected:
+    def evaluate(self, values):
+        requests, layout = prepare_inputs(self, values)
+        results = []
+        for inputs in requests:
+            coordinates = inputs["coordinates"]
+            if coordinates.ndim != 3 or coordinates.shape[-1] != self.config.spatial_dim:
                 raise ValueError(
-                    f"point_features must have shape {expected}, got {tuple(features.shape)}."
+                    f"coordinates must have shape [B, N, {self.config.spatial_dim}], "
+                    f"got {tuple(coordinates.shape)}."
                 )
-            if not features.is_floating_point():
-                raise TypeError("point_features must use a floating-point dtype.")
-        elif inputs.point_features is not None:
-            features = self._ensure_tensor(inputs.point_features, name="point_features")
-            expected = (*coordinates.shape[:2], 0)
-            if tuple(features.shape) != expected:
-                raise ValueError("Set input_dim to use point_features.")
-            if not features.is_floating_point():
-                raise TypeError("point_features must use a floating-point dtype.")
+            if not coordinates.is_floating_point():
+                raise TypeError("coordinates must use a floating-point dtype.")
+            if coordinates.shape[0] < 1 or coordinates.shape[1] < 1:
+                raise ValueError("Every sample must contain at least one point.")
 
-        if inputs.point_mask is not None:
-            mask = torch.as_tensor(inputs.point_mask)
-            expected_mask = tuple(coordinates.shape[:2])
-            if tuple(mask.shape) != expected_mask:
-                raise ValueError(
-                    f"point_mask must have shape {expected_mask}, got {tuple(mask.shape)}."
-                )
-            if mask.dtype != torch.bool:
-                raise TypeError("point_mask must use a boolean dtype.")
-            if not torch.all(mask.any(dim=1)):
-                raise ValueError("Every sample must contain at least one valid point.")
-        return True
+            if self.config.input_dim > 0:
+                if inputs.get("point_features") is None:
+                    raise ValueError(f"SIREN expects {self.config.input_dim} point features.")
+                features = inputs["point_features"]
+                expected = (*coordinates.shape[:2], self.config.input_dim)
+                if tuple(features.shape) != expected:
+                    raise ValueError(
+                        f"point_features must have shape {expected}, got {tuple(features.shape)}."
+                    )
+                if not features.is_floating_point():
+                    raise TypeError("point_features must use a floating-point dtype.")
+            elif inputs.get("point_features") is not None:
+                features = inputs["point_features"]
+                expected = (*coordinates.shape[:2], 0)
+                if tuple(features.shape) != expected:
+                    raise ValueError("Set input_dim to use point_features.")
+                if not features.is_floating_point():
+                    raise TypeError("point_features must use a floating-point dtype.")
 
-    def _predict(self, inputs: ModelInput) -> ModelOutput:
-        parameter = next(self.parameters())
-        coordinates = torch.as_tensor(
-            inputs.coordinates, device=parameter.device, dtype=parameter.dtype
-        )
-        x = coordinates
-        if self.config.input_dim > 0:
-            features = torch.as_tensor(
-                inputs.point_features, device=parameter.device, dtype=parameter.dtype
+            if inputs.get("point_mask") is not None:
+                mask = torch.as_tensor(inputs.get("point_mask"))
+                expected_mask = tuple(coordinates.shape[:2])
+                if tuple(mask.shape) != expected_mask:
+                    raise ValueError(
+                        f"point_mask must have shape {expected_mask}, got {tuple(mask.shape)}."
+                    )
+                if mask.dtype != torch.bool:
+                    raise TypeError("point_mask must use a boolean dtype.")
+                check(mask.any(dim=1), "Every sample must contain at least one valid point.")
+
+            parameter = next(self.parameters())
+            coordinates = torch.as_tensor(
+                inputs.get("coordinates"), device=parameter.device, dtype=parameter.dtype
             )
-            x = torch.cat((coordinates, features), dim=-1)
+            x = coordinates
+            if self.config.input_dim > 0:
+                features = torch.as_tensor(
+                    inputs.get("point_features"), device=parameter.device, dtype=parameter.dtype
+                )
+                x = torch.cat((coordinates, features), dim=-1)
 
-        x = self.first_layer(x)
-        for layer in self.hidden_layers:
-            x = layer(x)
-        predictions = self.output_layer(x)
-        if not self.config.outermost_linear:
-            predictions = torch.sin(self.config.hidden_omega_0 * predictions)
+            x = self.first_layer(x)
+            for layer in self.hidden_layers:
+                x = layer(x)
+            predictions = self.output_layer(x)
+            if not self.config.outermost_linear:
+                predictions = torch.sin(self.config.hidden_omega_0 * predictions)
 
-        mask = None
-        if inputs.point_mask is not None:
-            mask = torch.as_tensor(inputs.point_mask, device=parameter.device, dtype=torch.bool)
-            predictions = predictions.masked_fill(~mask.unsqueeze(-1), 0.0)
-        return ModelOutput(
-            predictions=predictions,
-            latent=x,
-            metadata={"point_mask": mask} if mask is not None else {},
-        )
+            mask = None
+            if inputs.get("point_mask") is not None:
+                mask = torch.as_tensor(inputs.get("point_mask"), device=parameter.device, dtype=torch.bool)
+                predictions = predictions.masked_fill(~mask.unsqueeze(-1), 0.0)
+            results.append(dict(
+                predictions=predictions,
+                latent=x,
+                metadata={"point_mask": mask} if mask is not None else {},
+            ))
+        return finish_outputs(self, results, layout)
