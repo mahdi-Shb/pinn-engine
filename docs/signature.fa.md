@@ -13,6 +13,28 @@ Signature({x: "point"}, {y: "query"})      # May mix points; output has a new ax
 
 evaluate در این مسیر Tensor یا لیست Tensor خام می‌گیرد؛ محورهای خارج از Signature خودکار با vmap یا حلقهٔ لیست پردازش می‌شوند. موتور ترتیب core را می‌چیند. شکل ذاتی Quantity مثل (3,) جزو محورهای نمونه نیست.
 
+## بررسی مقدار داخل evaluate
+
+`check` یک Tensor بولی می‌گیرد و اگر حتی یک عنصر False باشد، `ValueError` با پیام داده‌شده می‌دهد:
+
+```python
+from PINNCore import Model, Quantity, Signature, check
+
+valid, count = Quantity("valid"), Quantity("count")
+
+class CountValid(Model):
+    signature = Signature({valid: "point"}, {count: ()})
+
+    def evaluate(self, values):
+        mask = values[valid]
+        check(mask.any(), "Geometry has no valid points")
+        return {count: mask.sum()}
+```
+
+evaluate همچنان یک هندسه را می‌بیند؛ لازم نیست محور batch را در signature بگیرد. قانون اختصاصی `check`، حتی زیر vmap تودرتو، شرط همهٔ نمونه‌ها را بررسی می‌کند و نامعتبر بودن یکی، کل فراخوانی را متوقف می‌کند. برای شرط وابسته به شکل مانند `x.shape[-1] != 3`، همان `if` معمولی کافی است.
+
+این مسیر برای اجرای eager است؛ سازگاری با `torch.compile` تضمین نشده است.
+
 ## محور ویژهٔ "..."
 
 این یک رشتهٔ ویژه در Signature است، نه آرگومان all_axes=True و نه نام یک محور واقعی Value. حداکثر یک بار در هر ورودی یا خروجی می‌آید. اگر Signature شامل آن باشد، مدل مسئول batching می‌شود: forward همان نگاشت ورودی و همان Valueها را یک بار به evaluate می‌دهد؛ هیچ برش، جابه‌جایی، حلقه یا vmap خودکاری اجرا نمی‌کند. خروجی evaluate نیز باید نگاشت Quantity به Value باشد. فقط payloadهای پشتیبانی‌شدهٔ Value، یعنی Tensor و لیست تخت Tensor، مجازند؛ نوع عمومی جدیدی اضافه نشده است.

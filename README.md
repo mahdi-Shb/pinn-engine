@@ -35,6 +35,8 @@ for optional trimesh operations. `dev` installs the test dependency and
 - [Signature and wildcard axes](docs/signature.fa.md): preserved axis names
   default to sample independence, with explicit `independence` overrides. Signatures containing `"..."` let the model
   handle named Values directly, with no automatic mapping or permutation.
+- `check(condition, message)` validates boolean Tensor conditions inside
+  `evaluate`, including nested `vmap`; see the [short example](docs/signature.fa.md#بررسی-مقدار-داخل-evaluate).
 - [GeoCore wrapper](docs/geocore.fa.md): sequential CPU generation of design
   variants as named Tensors for fixed sizes and Tensor lists for variable sizes,
   with [a runnable example](examples/geocore_design.py).

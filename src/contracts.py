@@ -7,7 +7,7 @@ Implementation lives in PINNCore/; no class definitions are duplicated here.
 from PINNCore import (
     Axis, Quantity, Value, Signature, Model,
     Derivative, TotalDerivative, PartialDerivative,
-    DerivativeBackend, AutogradBackend, Solver, GeoCoreModel,
+    DerivativeBackend, AutogradBackend, Solver, GeoCoreModel, check,
 )
 from PINNCore import __all__
 

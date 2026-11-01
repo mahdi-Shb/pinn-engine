@@ -8,9 +8,10 @@ from .derivative_backends import DerivativeBackend
 from ._autograd import AutogradBackend
 from .solver import Solver
 from .geocore import GeoCoreModel
+from .checks import check
 
 __all__ = [
     "Axis", "Quantity", "Value", "Signature", "Model",
     "Derivative", "TotalDerivative", "PartialDerivative",
-    "DerivativeBackend", "AutogradBackend", "Solver", "GeoCoreModel",
+    "DerivativeBackend", "AutogradBackend", "Solver", "GeoCoreModel", "check",
 ]
