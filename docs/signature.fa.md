@@ -18,7 +18,7 @@ evaluate در این مسیر Tensor یا لیست Tensor خام می‌گیرد
 `check` یک Tensor بولی می‌گیرد و اگر حتی یک عنصر False باشد، `ValueError` با پیام داده‌شده می‌دهد:
 
 ```python
-from PINNCore import Model, Quantity, Signature, check
+from pinncore import Model, Quantity, Signature, check
 
 valid, count = Quantity("valid"), Quantity("count")
 

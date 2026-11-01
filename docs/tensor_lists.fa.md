@@ -7,7 +7,7 @@ job موازی خودکار اضافه نشده است.
 ## مقدار و امضای تابع
 
 ```python
-from PINNCore import Model, Quantity, Signature, Value
+from pinncore import Model, Quantity, Signature, Value
 import torch
 
 coordinates = Quantity("coordinates", (3,))

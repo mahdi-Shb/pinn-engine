@@ -4,8 +4,8 @@ from collections.abc import Sequence
 
 import torch
 from torch import nn
-from PINNCore.checks import check
-from PINNCore.networks.normalization import BatchNorm2d, normalization_mask, has_normalization_mask
+from pinncore.checks import check
+from pinncore.networks.normalization import BatchNorm2d, normalization_mask, has_normalization_mask
 
 
 def square_distance(source: torch.Tensor, target: torch.Tensor) -> torch.Tensor:

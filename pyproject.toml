@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "PINNCore"
+name = "pinncore"
 version = "0.1.0"
 description = "Experimental quantity, named-axis model, and derivative contracts for PINNs"
 readme = "README.md"
@@ -18,16 +18,16 @@ notebook = ["matplotlib>=3.6", "ipython>=8", "jupyterlab>=4"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-license-files = ["LICENSE", "src/PINNCore/networks/LICENSE", "src/geocore/_bin/LICENSE"]
+license-files = ["LICENSE", "src/pinncore/networks/LICENSE", "src/geocore/_bin/LICENSE"]
 py-modules = ["contracts"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["PINNCore*", "geocore*"]
+include = ["pinncore*", "geocore*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"PINNCore.networks" = ["LICENSE"]
+"pinncore.networks" = ["LICENSE"]
 geocore = ["_bin/LICENSE", "_bin/win-x64/*.dll", "_bin/osx-arm64/*.dylib", "_bin/linux-x64/*.so*"]
 
 [tool.pytest.ini_options]

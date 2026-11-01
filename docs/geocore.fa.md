@@ -44,4 +44,4 @@ edge_index از (2,E) به (E,2) و voxel از (C,D,H,W) به (D,H,W,C) تبدی
 
 محاسبات و خروجی فعلاً CPU هستند؛ ورودی CUDA یا requires_grad=True صریحاً رد می‌شود. از این wrapper نمی‌توان مشتق نسبت به پارامتر طراحی گرفت. خروجی را بعداً می‌توان به GPU منتقل کرد؛ انتقال بخشی از این کلاس نیست. seed مشخص در هر فراخوانی نمونه‌ها را تکرار می‌کند؛ seed=None نمونه‌های تازه می‌دهد. Integer و bool حفظ می‌شوند و floating_dtype فقط اعشار را تبدیل می‌کند. داده‌های رشته‌ای مثل نام tagها وارد Value نمی‌شوند؛ ترتیب ثابت tagها در Design مسئولیت source است.
 
-انتخاب outputs تنها خروجی عمومی رپر را محدود می‌کند؛ خود GeoCore ممکن است در builder محاسبات دیگر هم انجام دهد. تضمین pruning، compile یا آماده‌سازی موازی نداریم. DataLoader و هر دو حالت RAR مطابق note قبلی برای آینده باز هستند. نصب dependencyهای GeoCore اختیاری است؛ import معمول PINNCore به NumPy/Numba وابسته نیست.
+انتخاب outputs تنها خروجی عمومی رپر را محدود می‌کند؛ خود GeoCore ممکن است در builder محاسبات دیگر هم انجام دهد. تضمین pruning، compile یا آماده‌سازی موازی نداریم. DataLoader و هر دو حالت RAR مطابق note قبلی برای آینده باز هستند. نصب dependencyهای GeoCore اختیاری است؛ import معمول pinncore به NumPy/Numba وابسته نیست.

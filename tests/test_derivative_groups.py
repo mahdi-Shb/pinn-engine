@@ -3,7 +3,7 @@
 import pytest
 import torch
 from torch.func import jacrev
-from PINNCore import AutogradBackend, Derivative, DerivativeBackend, Model, Quantity, Signature, Solver, Value
+from pinncore import AutogradBackend, Derivative, DerivativeBackend, Model, Quantity, Signature, Solver, Value
 
 
 class Function(Model):

@@ -1,6 +1,6 @@
-# PINNCore
+# pinncore
 
-Python package: `PINNCore`. Repository and checkout directory: `pinn_engine`.
+Python package: `pinncore`. Repository and checkout directory: `pinn_engine`.
 
 An experimental engine for composing PyTorch models using quantities and named
 sample axes. Quantities are identified by name; Model and Solver do not
@@ -42,9 +42,9 @@ for optional trimesh operations. `dev` installs the test dependency and
   with [a runnable example](examples/geocore_design.py).
 - [src/geocore/](src/geocore/): independent geometry package (`import geocore`),
   including its native runtime libraries.
-- [src/PINNCore/networks/](src/PINNCore/networks/): native network Models
+- [src/pinncore/networks/](src/pinncore/networks/): native network Models
   and their shared input/output contract.
-- [src/PINNCore/networks/normalization.py](src/PINNCore/networks/normalization.py): shared
+- [src/pinncore/networks/normalization.py](src/pinncore/networks/normalization.py): shared
   dense/list/masked BatchNorm and per-case point normalization.
   [Normalization details](docs/normalization.fa.md) and
   [upstream change summary](docs/network_upstream_changes.fa.md) document the boundary.
@@ -53,7 +53,7 @@ for optional trimesh operations. `dev` installs the test dependency and
 - [third_party/](third_party/): provenance, original documentation, benchmark
   utilities, examples, and tests retained as reference; active runtime packages
   live in `src/`.
-- [src/PINNCore/](src/PINNCore/): implementation modules:
+- [src/pinncore/](src/pinncore/): implementation modules:
   - `quantities.py`: `Quantity` declarations.
   - `values.py`: `Value`, named axes, and runtime shape checks.
   - `model.py`: `Signature`, abstract `Model`, and automatic `vmap`.
@@ -66,7 +66,7 @@ for optional trimesh operations. `dev` installs the test dependency and
     checks, and chunked tensor-output directions. No per-model backward or tape.
   - `_visualization.py`: Mermaid/DOT rendering and Graphviz file output.
 - [src/contracts.py](src/contracts.py): compatibility imports and the runnable example.
-  Both `from contracts import Model` and `from PINNCore import Model` resolve
+  Both `from contracts import Model` and `from pinncore import Model` resolve
   to the same class. Existing notebook imports remain valid.
 - [Temperature_Tutorial.ipynb](Temperature_Tutorial.ipynb): a DeepONet temperature
   example. Its branch takes the left boundary temperature, its trunk takes the
@@ -106,7 +106,7 @@ Both classes are public imports. Supplying an object is equivalent to choosing
 the built-in method by name:
 
 ```python
-from PINNCore import AutogradBackend, DerivativeBackend, Solver
+from pinncore import AutogradBackend, DerivativeBackend, Solver
 
 solver = Solver(models, outputs=loss, derivative_backend=AutogradBackend())
 ```
@@ -171,7 +171,7 @@ Geometry/domain interfaces are deferred; the GeoCore and field-domain ideas are
 recorded in [the design notes](docs/architecture_open_decisions.fa.md).
 
 The eleven Neural3DBench networks inherit directly from `Model` under
-`PINNCore.networks`. Each defines its own `signature` and `evaluate`; there is
+`pinncore.networks`. Each defines its own `signature` and `evaluate`; there is
 no `BaseNetwork`, `BaseGraphNetwork`, or `predict` API. Constructors accept
 `inputs={role: quantity}` and `outputs={role: quantity}`. Value-dependent checks
 run inside `evaluate` using `check`. Shared helpers handle layouts and graph

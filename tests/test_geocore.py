@@ -4,7 +4,7 @@ import torch
 
 # The optional geometry dependency must not be required for engine-only tests.
 gc = pytest.importorskip("geocore")
-from PINNCore import GeoCoreModel, Model, Quantity, Signature, Solver, Value
+from pinncore import GeoCoreModel, Model, Quantity, Signature, Solver, Value
 
 
 @pytest.fixture

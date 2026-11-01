@@ -1,15 +1,15 @@
-"""Compatibility imports for the modular PINNCore package.
+"""Compatibility imports for the modular pinncore package.
 
 Existing notebooks can keep using `from contracts import ...`.
-Implementation lives in PINNCore/; no class definitions are duplicated here.
+Implementation lives in pinncore/; no class definitions are duplicated here.
 """
 
-from PINNCore import (
+from pinncore import (
     Axis, Quantity, Value, Signature, Model,
     Derivative, TotalDerivative, PartialDerivative,
     DerivativeBackend, AutogradBackend, Solver, GeoCoreModel, check,
 )
-from PINNCore import __all__
+from pinncore import __all__
 
 def _example() -> None:
     """A trainable pointwise model followed by a loss over all sample axes."""

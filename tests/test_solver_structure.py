@@ -6,9 +6,9 @@ import pytest
 import torch
 from torch import nn
 
-from PINNCore import AutogradBackend, Derivative, DerivativeBackend, Model, Quantity, Signature, Solver, Value
-from PINNCore._graph import ComputationGraph
-from PINNCore.derivatives import DerivativeEngine
+from pinncore import AutogradBackend, Derivative, DerivativeBackend, Model, Quantity, Signature, Solver, Value
+from pinncore._graph import ComputationGraph
+from pinncore.derivatives import DerivativeEngine
 
 
 def make_models():

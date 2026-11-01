@@ -1,6 +1,6 @@
 # تفاوت با شبکه‌های اصلی همکار
 
-منبع، commit `1b635f4d1c3b47fab5c9e9a46b1824b789e478ee` از Neural3DBench است. snapshot اصلی در تاریخچهٔ موتور با `80e5c8d` و کد فعال در `src/PINNCore/networks` قرار دارد.
+منبع، commit `1b635f4d1c3b47fab5c9e9a46b1824b789e478ee` از Neural3DBench است. snapshot اصلی در تاریخچهٔ موتور با `80e5c8d` و کد فعال در `src/pinncore/networks` قرار دارد.
 
 > معماری‌ها و هستهٔ عددی از کد همکار آمده‌اند. قرارداد Quantity/Value، batching، قواعد استقلال و normalization ماسک‌پذیر تغییرات موتورند. حفظ الگوریتم به معنی یکسان‌بودن همهٔ رفتارهای اجرایی نیست.
 

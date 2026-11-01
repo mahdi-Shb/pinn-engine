@@ -3,9 +3,9 @@ from __future__ import annotations
 import inspect
 from typing import Any, Mapping, get_args, get_origin, Union
 
-from PINNCore.quantities import Quantity
+from pinncore.quantities import Quantity
 
-from PINNCore.model import Model
+from pinncore.model import Model
 from .configs import BaseModelConfig
 
 

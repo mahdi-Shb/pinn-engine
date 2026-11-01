@@ -1,19 +1,19 @@
 """The legacy facade and modular API must share the same class objects."""
 
 import contracts
-import PINNCore
+import pinncore
 
 
 def test_compatibility_exports_are_identical():
-    assert set(contracts.__all__) == set(PINNCore.__all__)
-    for name in PINNCore.__all__:
-        assert getattr(contracts, name) is getattr(PINNCore, name)
+    assert set(contracts.__all__) == set(pinncore.__all__)
+    for name in pinncore.__all__:
+        assert getattr(contracts, name) is getattr(pinncore, name)
 
 
 def test_public_api_has_no_geometry_or_field_contract():
-    for module in (contracts, PINNCore):
+    for module in (contracts, pinncore):
         assert not hasattr(module, "Geometry")
         assert not hasattr(module, "Field")
-    assert not hasattr(PINNCore.Model, "geometry")
-    assert not hasattr(PINNCore.Solver, "geometry")
-    assert not hasattr(PINNCore.Quantity("T"), "_domain")
+    assert not hasattr(pinncore.Model, "geometry")
+    assert not hasattr(pinncore.Solver, "geometry")
+    assert not hasattr(pinncore.Quantity("T"), "_domain")

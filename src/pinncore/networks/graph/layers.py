@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
-from PINNCore.networks.normalization import BatchNorm1d
+from pinncore.networks.normalization import BatchNorm1d
 
 
 def _get_activation(name: str | None) -> nn.Module:

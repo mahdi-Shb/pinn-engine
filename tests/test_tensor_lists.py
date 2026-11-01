@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch import nn
 
-from PINNCore import Model, Quantity, Signature, Solver, Value
+from pinncore import Model, Quantity, Signature, Solver, Value
 
 
 class Function(Model):

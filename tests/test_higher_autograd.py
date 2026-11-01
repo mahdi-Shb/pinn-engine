@@ -5,7 +5,7 @@ import pytest
 import torch
 from torch import nn
 from torch.func import jacrev
-from PINNCore import AutogradBackend, Derivative, Model, Quantity, Signature, Solver, Value
+from pinncore import AutogradBackend, Derivative, Model, Quantity, Signature, Solver, Value
 
 
 class Function(Model):

@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch import nn
 
-from PINNCore import Derivative, Model, Quantity, Signature, Solver, Value, check
+from pinncore import Derivative, Model, Quantity, Signature, Solver, Value, check
 
 
 def test_check_accepts_true_conditions_and_reports_the_callers_message():

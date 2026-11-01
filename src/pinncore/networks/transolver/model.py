@@ -6,9 +6,9 @@ from typing import Mapping
 import torch
 from torch import nn
 
-from PINNCore.model import Model
-from PINNCore.quantities import Quantity
-from PINNCore.checks import check
+from pinncore.model import Model
+from pinncore.quantities import Quantity
+from pinncore.checks import check
 
 from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 from ..configs import BaseModelConfig

@@ -12,7 +12,7 @@
 - هر ۱۱ شبکه مستقیماً `Model` است و `signature` و `evaluate` خودش را دارد؛ `BaseNetwork`، `BaseGraphNetwork` و `predict` حذف شده‌اند.
 - `check` تابع مستقل است؛ شرط مقدار را داخل `evaluate` و زیر `vmap` بررسی می‌کند. helperهای مشترک شبکه فقط layout و batch/packing را آماده و بازیابی می‌کنند.
 - `PointNet/PointNet++` دارای BatchNorm فقط Tensor می‌پذیرند؛ padding خودکار نداریم. packing گراف و لیست مدل‌های مجاز باقی‌اند.
-- خروجی ثابت GeoCore، Tensor و خروجی با اندازهٔ متغیر، لیست است. پکیج `PINNCore` و نام repo همچنان `pinn_engine` است.
+- خروجی ثابت GeoCore، Tensor و خروجی با اندازهٔ متغیر، لیست است. پکیج `pinncore` و نام repo همچنان `pinn_engine` است.
 - ۲۸۳ تست گذشت؛ مقایسهٔ مستقیم با سورس اصلی برای خروجی و گرادیان هر ۱۱ شبکه در تنظیمات نمونه نیز موفق بود. [گزارش بازنویسی‌شدهٔ تفاوت‌ها](neural3dbench_comparison.fa.md) قرارداد و diff فعلی را ثبت می‌کند.
 
 بندهای تاریخی پایین، وضعیت زمان ثبت خود را توضیح می‌دهند؛ این جمع‌بندی و [راهنمای شبکه‌ها](networks.fa.md) وضعیت اجرایی فعلی‌اند.
@@ -620,3 +620,8 @@ setuptools اکنون پکیج‌ها را مستقیماً از src پیدا م
 ## شبکه‌های مستقیم Model — ۲۰۲۶-۱۱-۰۱
 
 BaseNetwork و BaseGraphNetwork حذف شدند. هر ۱۱ شبکه مستقیماً Model است و signature و evaluate خودش را دارد؛ predict، _predict و forward اختصاصیِ تبدیل رابط حذف شدند. محاسبات و اعتبارسنجی داخل evaluate همان شبکه‌اند؛ شرط‌های وابسته به مقدار با check و شرط‌های شکل/dtype به‌صورت معمول بررسی می‌شوند. prepare_inputs و finish_outputs فقط تبدیل layout، batch و packing گراف را مشترک می‌کنند. ModelInput/Output و adapterهای قدیمی مرجع داده‌اند و رابط اجرای شبکه نیستند. پارامترها، normalization، منع لیست در PointNetهای دارای BatchNorm و checkpoint بیرون vmap برای GINO حفظ شدند.
+
+
+## نام پکیج با حروف کوچک — ۲۰۲۶-۱۱-۰۱
+
+نام پکیج، مسیر سورس و importها به `pinncore` و `src/pinncore` تغییر کردند. نام repo و checkout همچنان `pinn_engine` است. نام uppercase در بندهای تاریخی به وضعیت قبلی اشاره دارد؛ API جاری `from pinncore import ...` است.

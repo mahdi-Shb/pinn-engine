@@ -7,10 +7,10 @@ import pytest
 import torch
 from torch import nn
 
-from PINNCore import Derivative, GeoCoreModel, Model, Quantity, Signature, Solver, Value
-from PINNCore import networks
-from PINNCore.networks import ModelInput
-from PINNCore.networks._contract import _specs
+from pinncore import Derivative, GeoCoreModel, Model, Quantity, Signature, Solver, Value
+from pinncore import networks
+from pinncore.networks import ModelInput
+from pinncore.networks._contract import _specs
 
 
 @pytest.fixture(autouse=True)

@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from PINNCore.quantities import Quantity
+from pinncore.quantities import Quantity
 from numbers import Integral
 from typing import Sequence
 
 import torch
 from torch import nn
 
-from PINNCore import Model, check
+from pinncore import Model, check
 from .._contract import initialize_contract, contract_signature, prepare_inputs, finish_outputs
 from ..configs import BaseModelConfig
 from ..fno.components import FourierOperatorBlock3d, get_activation

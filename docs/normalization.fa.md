@@ -1,10 +1,10 @@
 # نرمال‌سازی مشترک
 
-منطق عددی در `src/PINNCore/networks/normalization.py` قرار دارد؛ مستقل از Model و شبکه قابل استفاده است:
+منطق عددی در `src/pinncore/networks/normalization.py` قرار دارد؛ مستقل از Model و شبکه قابل استفاده است:
 
 ```python
 import torch
-from PINNCore.networks.normalization import BatchNorm1d
+from pinncore.networks.normalization import BatchNorm1d
 
 layer = BatchNorm1d(16)
 features = [torch.randn(1, 16, 20), torch.randn(1, 16, 40)]

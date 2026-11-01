@@ -1,7 +1,7 @@
 """Independence metadata affects derivative paths, not normal evaluation."""
 import pytest
 import torch
-from PINNCore import Derivative, Model, Quantity, Signature, Solver, Value
+from pinncore import Derivative, Model, Quantity, Signature, Solver, Value
 
 
 class Function(Model):

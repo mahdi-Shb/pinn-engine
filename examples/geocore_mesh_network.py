@@ -7,8 +7,8 @@ Run after installing the engine and optional geometry dependency:
 
 import torch
 
-from PINNCore import GeoCoreModel, Quantity, Solver, Value
-from PINNCore.networks import MeshGraphNet, MeshGraphNetConfig
+from pinncore import GeoCoreModel, Quantity, Solver, Value
+from pinncore.networks import MeshGraphNet, MeshGraphNetConfig
 import geocore as gc
 
 

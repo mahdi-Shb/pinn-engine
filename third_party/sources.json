@@ -5,8 +5,8 @@
     "commit": "1b635f4d1c3b47fab5c9e9a46b1824b789e478ee",
     "selection": "All Git-tracked files; Git history excluded",
     "updated_on": "2026-10-31",
-    "local_changes": "direct PINNCore.Model classes with per-network signature/evaluate, no BaseNetwork/BaseGraphNetwork or predict API; internal tensor role dictionaries and shared layout/packing helpers; value-dependent validation via check; fixed-shape GINO masks and outer-vmap checkpoint; vmap-compatible PointNet2/DeepNURBS; shared masked normalization and PointNet instance mode; dense-only PointNet/PointNet2 inputs with BatchNorm",
-    "source_path": "src/PINNCore/networks"
+    "local_changes": "direct pinncore.Model classes with per-network signature/evaluate, no BaseNetwork/BaseGraphNetwork or predict API; internal tensor role dictionaries and shared layout/packing helpers; value-dependent validation via check; fixed-shape GINO masks and outer-vmap checkpoint; vmap-compatible PointNet2/DeepNURBS; shared masked normalization and PointNet instance mode; dense-only PointNet/PointNet2 inputs with BatchNorm",
+    "source_path": "src/pinncore/networks"
   },
   "geocore": {
     "archive": "geometry - py.rar",

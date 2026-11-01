@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from PINNCore.quantities import Quantity
-from PINNCore.model import Model
+from pinncore.quantities import Quantity
+from pinncore.model import Model
 
 import torch
 from torch import nn
