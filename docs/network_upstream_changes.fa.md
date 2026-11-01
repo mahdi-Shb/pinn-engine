@@ -2,7 +2,7 @@
 
 گزارش کاملِ فایل‌به‌فایل، تغییرات رفتار و سازگاری، و diff منبع در [مقایسهٔ تفصیلی با Neural3DBench](neural3dbench_comparison.fa.md) آمده است.
 
-مبنای منبع، commit `1b635f4d1c3b47fab5c9e9a46b1824b789e478ee` از neural3dbench است؛ snapshot متناظر داخل تاریخچهٔ موتور در `80e5c8d` ثبت شده است. کدهای فعلی در `src/pinn_engine/networks` هستند.
+مبنای منبع، commit `1b635f4d1c3b47fab5c9e9a46b1824b789e478ee` از neural3dbench است؛ snapshot متناظر داخل تاریخچهٔ موتور در `80e5c8d` ثبت شده است. کدهای فعلی در `src/PINNCore/networks` هستند.
 
 توضیح دقیق و قابل ارسال به همکار:
 
@@ -15,7 +15,7 @@
 | معماری شبکه‌ها | تعداد و ترتیب لایه‌ها، T-Net، message passing، attention، Fourier blocks، encoder/decoder اصلی حفظ شده‌اند. |
 | رابط | BaseNetwork یک Model موتور شده؛ constructor نگاشت inputs/outputs می‌گیرد و forward عددی سابق با نام _predict اجرا می‌شود. predict(ModelInput) خروجی‌های قبلی و auxiliary/metadata را نگه می‌دارد. |
 | محور و shape | تبدیل channel-first، reshape مؤلفه‌ها، vmap، استقلال، packing گراف و بازیابی لیست در _contract و helperهای موتور است. |
-| normalization جدید | منطق Tensor/list/mask در pinn_engine/networks/normalization.py است. در FNO، U-Net و GCN/GAT فقط کلاس BatchNorm از این ماژول import شده؛ forward این بلوک‌ها تغییر نکرده است. |
+| normalization جدید | منطق Tensor/list/mask در PINNCore/networks/normalization.py است. در FNO، U-Net و GCN/GAT فقط کلاس BatchNorm از این ماژول import شده؛ forward این بلوک‌ها تغییر نکرده است. |
 | PointNet | factory نرمال‌سازی، گزینهٔ instance، scope ماسک و پاک‌کردن ورودی نامعتبر اضافه شده‌اند. بدنهٔ forward خود encoder، T-Net و دو head دست نخورده است. normalization بعد از pooling در حالت instance طبق توافق حذف است. |
 | PointNet++ | BatchNorm مشترک و scope ماسک متناظر با سطح grouping/interpolation اضافه شده است. الگوریتم اصلی نمونه‌برداری و propagation بازنویسی نشده است. |
 | قرارداد ورودی PointNetهای دارای BatchNorm | در مسیر Model و Solver، هر ورودی لیستی رد می‌شود؛ این شامل لیست هم‌اندازه و حالت eval نیز هست. adapter قبلیِ padding خودکار حذف شده است. Tensor با ماسک صریح همچنان پشتیبانی می‌شود؛ لیست در خود لایهٔ مستقل BatchNorm و در مدل‌های بدون BatchNorm حفظ شده است. |

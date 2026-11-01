@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from pinn_engine.quantities import Quantity
+from PINNCore.quantities import Quantity
 from numbers import Integral
 from typing import Sequence
 

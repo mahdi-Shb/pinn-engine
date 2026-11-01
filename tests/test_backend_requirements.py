@@ -1,7 +1,7 @@
 """Backend-specific values and mesh dependencies, without derivative plans."""
 
 import torch
-from pinn_engine import Derivative, DerivativeBackend, Model, Quantity, Signature, Solver, Value
+from PINNCore import Derivative, DerivativeBackend, Model, Quantity, Signature, Solver, Value
 
 
 def test_sampled_method_receives_mesh_produced_by_model_without_ad_or_paths():

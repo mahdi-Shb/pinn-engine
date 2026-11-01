@@ -1,6 +1,6 @@
 # قرارداد مشتق مستقیم و مرتبه‌های بالاتر
 
-موتور در `src/pinn_engine` است؛ importهای `contracts` و `pinn_engine` همان کلاس‌ها را صادر می‌کنند.
+موتور در `src/PINNCore` است؛ importهای `contracts` و `PINNCore` همان کلاس‌ها را صادر می‌کنند.
 نسخهٔ قبلیِ AD محلی با holding و اشتراک VJP در branch `partial-derivative-and-geometry-domain-support` و commit
 `12d97a1` حفظ شده است. در main دیگر DerivativePlan، برنامهٔ مسیر یا backward مدل‌به‌مدل نداریم.
 

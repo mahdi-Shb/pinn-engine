@@ -5,9 +5,9 @@ from typing import Any, Mapping
 
 import torch
 
-from pinn_engine.model import Model, Signature
-from pinn_engine.quantities import Quantity
-from pinn_engine.values import Value
+from PINNCore.model import Model, Signature
+from PINNCore.quantities import Quantity
+from PINNCore.values import Value
 
 from .configs import BaseModelConfig
 from .types import ModelCapabilities, ModelInput, ModelOutput

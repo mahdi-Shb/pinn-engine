@@ -1,7 +1,7 @@
 """Run after installing the engine with the geometry extra."""
 import torch
 import geocore as gc
-from pinn_engine import GeoCoreModel, Model, Quantity, Signature, Solver, Value
+from PINNCore import GeoCoreModel, Model, Quantity, Signature, Solver, Value
 
 # GeoCore creates two variants without mutating this template.
 design = gc.Design({

@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Mapping
 
-from pinn_engine.quantities import Quantity
+from PINNCore.quantities import Quantity
 
 import torch
 from torch import nn

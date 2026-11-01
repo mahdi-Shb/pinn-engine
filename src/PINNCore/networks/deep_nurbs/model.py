@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from numbers import Integral
 from typing import Any, Mapping, Sequence
 
-from pinn_engine.quantities import Quantity
+from PINNCore.quantities import Quantity
 
 import torch
 from torch import nn

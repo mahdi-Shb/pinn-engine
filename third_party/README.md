@@ -3,8 +3,8 @@
 کد اجرایی از این پوشه خارج شده است:
 
 - GeoCore: `src/geocore`؛ پکیج مستقل با همان `import geocore`.
-- شبکه‌ها: `src/pinn_engine/networks`؛ استفاده با `from pinn_engine.networks import ...`.
-- قرارداد شبکه‌ها: `src/pinn_engine/networks/_contract.py`؛ رپر GeoCore: `src/pinn_engine/geocore.py`.
+- شبکه‌ها: `src/PINNCore/networks`؛ استفاده با `from PINNCore.networks import ...`.
+- قرارداد شبکه‌ها: `src/PINNCore/networks/_contract.py`؛ رپر GeoCore: `src/PINNCore/geocore.py`.
 
 فایل `sources.json` commit/آرشیو مبنا و مسیر فعلی کدها را ثبت می‌کند. مجوزها حفظ شده‌اند و همراه بسته نصب می‌شوند.
 

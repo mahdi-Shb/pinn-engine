@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.func import jacrev
 
-from pinn_engine import Derivative, Model, Quantity, Signature, Solver, Value
+from PINNCore import Derivative, Model, Quantity, Signature, Solver, Value
 
 
 class Function(Model):

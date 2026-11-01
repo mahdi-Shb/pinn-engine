@@ -5,7 +5,7 @@ These small test backends are not new built-in numerical methods.
 
 import torch
 from torch.func import jvp
-from pinn_engine import Derivative, DerivativeBackend, Model, Quantity, Signature, Solver, Value
+from PINNCore import Derivative, DerivativeBackend, Model, Quantity, Signature, Solver, Value
 
 
 class Function(Model):

@@ -3,103 +3,78 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from pinn_engine.quantities import Quantity
-from pinn_engine.networks.normalization import normalization_mask, masked_point_inputs
+from PINNCore.quantities import Quantity
+from PINNCore.networks.normalization import normalization_mask, masked_point_inputs
 
 import torch
 
 from ..base import BaseNetwork
 from ..configs import BaseModelConfig
-from ..pointnet.components import PointNetClassificationHead
 from ..types import ModelCapabilities, ModelInput, ModelOutput
 
-from .components import PointNet2Encoder, PointNet2SegmentationHead
+from .components import (
+    PointNetClassificationHead,
+    PointNetEncoder,
+    PointNetSegmentationHead,
+)
 
 
 @dataclass
-class PointNet2Config(BaseModelConfig):
-    """Configuration for single-scale PointNet++ classification or segmentation."""
+class PointNetConfig(BaseModelConfig):
+    """Configuration for classification or point-wise PointNet prediction."""
 
     input_dim: int = 3
     output_dim: int = 1
     task: str = "segmentation"
-    sample_counts: tuple[int, int] = (512, 128)
-    radii: tuple[float, float] = (0.2, 0.4)
-    neighbor_counts: tuple[int, int] = (32, 64)
-    abstraction_channels: tuple[tuple[int, ...], tuple[int, ...]] = (
-        (64, 64, 128),
-        (128, 128, 256),
-    )
     global_dim: int = 1024
     dropout: float = 0.3
+    input_transform: bool = True
+    feature_transform: bool = True
     normalization: str = "batch"
     representation: str = "POINT_CLOUD"
 
     def __post_init__(self) -> None:
-        self.name = "pointnet2"
-        self.model_type = "pointnet2"
+        self.name = "pointnet"
+        self.model_type = "pointnet"
         self.representation = "POINT_CLOUD"
         self.task = self.task.lower()
         self.normalization = self.normalization.lower()
-        self.sample_counts = tuple(self.sample_counts)
-        self.radii = tuple(self.radii)
-        self.neighbor_counts = tuple(self.neighbor_counts)
-        self.abstraction_channels = tuple(
-            tuple(channels) for channels in self.abstraction_channels
-        )
         if self.input_dim < 3:
             raise ValueError("input_dim must include at least XYZ coordinates (3 channels).")
-        if self.output_dim <= 0 or self.global_dim <= 0:
-            raise ValueError("output_dim and global_dim must be positive.")
+        if self.output_dim <= 0:
+            raise ValueError("output_dim must be positive.")
+        if self.global_dim <= 0:
+            raise ValueError("global_dim must be positive.")
         if self.task not in {"classification", "segmentation"}:
             raise ValueError("task must be 'classification' or 'segmentation'.")
-        if self.normalization not in {"batch", "none"}:
-            raise ValueError("normalization must be batch or none.")
+        if self.normalization not in {"batch", "instance", "none"}:
+            raise ValueError("normalization must be batch, instance, or none.")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in the range [0, 1).")
-        for name, values in (
-            ("sample_counts", self.sample_counts),
-            ("radii", self.radii),
-            ("neighbor_counts", self.neighbor_counts),
-            ("abstraction_channels", self.abstraction_channels),
-        ):
-            if len(values) != 2:
-                raise ValueError(f"{name} must contain exactly two hierarchy levels.")
-        if any(value < 1 for value in self.sample_counts + self.neighbor_counts):
-            raise ValueError("sample_counts and neighbor_counts must be positive.")
-        if any(value <= 0 for value in self.radii):
-            raise ValueError("radii must be positive.")
-        if any(
-            not channels or any(value < 1 for value in channels)
-            for channels in self.abstraction_channels
-        ):
-            raise ValueError("Every abstraction MLP must contain positive channel sizes.")
 
     @property
     def feature_dim(self) -> int:
         return self.input_dim - 3
 
 
-class PointNet2(BaseNetwork):
-    """PointNet++ with hierarchical local abstraction and feature propagation."""
+class PointNet(BaseNetwork):
+    """PointNet for global classification and point-wise prediction."""
 
-    config_class = PointNet2Config
+    config_class = PointNetConfig
 
     def __init__(
         self,
-        config: PointNet2Config | None = None,
+        config: PointNetConfig | None = None,
         *,
         inputs: Mapping[str, Quantity],
         outputs: Mapping[str, Quantity],
     ):
-        super().__init__(config=config or PointNet2Config(), inputs=inputs, outputs=outputs)
-        self.encoder = PointNet2Encoder(
-            self.config.feature_dim,
-            self.config.sample_counts,
-            self.config.radii,
-            self.config.neighbor_counts,
-            self.config.abstraction_channels,
+        super().__init__(config=config or PointNetConfig(), inputs=inputs, outputs=outputs)
+        self.encoder = PointNetEncoder(
+            self.config.input_dim,
             self.config.global_dim,
+            input_transform=self.config.input_transform,
+            feature_transform=self.config.feature_transform,
             normalization=self.config.normalization,
         )
         if self.config.task == "classification":
@@ -110,10 +85,7 @@ class PointNet2(BaseNetwork):
                 normalization=self.config.normalization,
             )
         else:
-            self.head = PointNet2SegmentationHead(
-                self.config.input_dim,
-                self.config.abstraction_channels[0][-1],
-                self.config.abstraction_channels[1][-1],
+            self.head = PointNetSegmentationHead(
                 self.config.global_dim,
                 self.config.output_dim,
                 self.config.dropout,
@@ -139,7 +111,7 @@ class PointNet2(BaseNetwork):
         points = self._ensure_tensor(inputs.coordinates, name="coordinates")
         if points.ndim != 3 or points.shape[-1] != 3:
             raise ValueError(
-                "PointNet++ coordinates must have shape [B, N, 3], "
+                "PointNet coordinates must have shape [B, N, 3], "
                 f"got {tuple(points.shape)}."
             )
         if not points.is_floating_point():
@@ -147,17 +119,19 @@ class PointNet2(BaseNetwork):
         if points.shape[1] < 1:
             raise ValueError("Each point cloud must contain at least one point.")
 
+        expected_features = self.config.feature_dim
         if inputs.point_features is None:
-            if self.config.feature_dim:
+            if expected_features:
                 raise ValueError(
-                    f"PointNet++ expects {self.config.feature_dim} additional point features."
+                    f"PointNet expects {expected_features} additional point features."
                 )
         else:
             features = self._ensure_tensor(inputs.point_features, name="point_features")
-            expected = (*points.shape[:2], self.config.feature_dim)
-            if tuple(features.shape) != expected:
+            expected_shape = (*points.shape[:2], expected_features)
+            if tuple(features.shape) != expected_shape:
                 raise ValueError(
-                    f"point_features must have shape {expected}, got {tuple(features.shape)}."
+                    f"point_features must have shape {expected_shape}, "
+                    f"got {tuple(features.shape)}."
                 )
             if not features.is_floating_point():
                 raise TypeError("point_features must use a floating-point dtype.")
@@ -185,34 +159,23 @@ class PointNet2(BaseNetwork):
             features = torch.as_tensor(
                 inputs.point_features, device=parameter.device, dtype=parameter.dtype
             )
-        mask = (
-            torch.ones(points.shape[:2], dtype=torch.bool, device=points.device)
-            if inputs.point_mask is None
-            else torch.as_tensor(inputs.point_mask, device=points.device, dtype=torch.bool)
-        )
+        mask = None
+        if inputs.point_mask is not None:
+            mask = torch.as_tensor(inputs.point_mask, device=parameter.device, dtype=torch.bool)
 
-        points, features = masked_point_inputs(points, features, mask if inputs.point_mask is not None else None)
-        with normalization_mask(mask, enabled=inputs.point_mask is not None):
-            global_feature, level_points, level_features, level_masks = self.encoder(
-                points, features, mask
-            )
+        points, features = masked_point_inputs(points, features, mask)
+        with normalization_mask(mask, enabled=mask is not None):
+            local, global_feature, transforms = self.encoder(points, features, mask)
             if self.config.task == "classification":
                 predictions = self.head(global_feature)
             else:
-                predictions = self.head(
-                    points,
-                    features,
-                    mask,
-                    level_points,
-                    level_features,
-                    level_masks,
-                )
+                predictions = self.head(local, global_feature)
+                if mask is not None:
+                    predictions = predictions.masked_fill(~mask.unsqueeze(-1), 0.0)
+
         return ModelOutput(
             predictions=predictions,
             latent=global_feature,
-            auxiliary={
-                "sampled_coordinates": level_points,
-                "sampled_masks": level_masks,
-            },
-            metadata={"point_mask": mask},
+            auxiliary=transforms,
+            metadata={"point_mask": mask} if mask is not None else {},
         )

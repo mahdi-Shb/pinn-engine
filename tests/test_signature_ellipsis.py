@@ -1,7 +1,7 @@
 """Wildcard Values and explicit promises of independence on preserved axes."""
 import pytest
 import torch
-from pinn_engine import Derivative, Model, Quantity, Signature, Solver, Value
+from PINNCore import Derivative, Model, Quantity, Signature, Solver, Value
 
 
 class Function(Model):

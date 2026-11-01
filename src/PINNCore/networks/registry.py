@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Mapping, get_args, get_origin, Union
 
-from pinn_engine.quantities import Quantity
+from PINNCore.quantities import Quantity
 
 from .base import BaseNetwork
 from .configs import BaseModelConfig

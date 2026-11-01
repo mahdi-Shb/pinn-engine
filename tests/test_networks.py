@@ -6,9 +6,9 @@ import pytest
 import torch
 from torch import nn
 
-from pinn_engine import Derivative, GeoCoreModel, Model, Quantity, Signature, Solver, Value
-from pinn_engine import networks
-from pinn_engine.networks import ModelInput
+from PINNCore import Derivative, GeoCoreModel, Model, Quantity, Signature, Solver, Value
+from PINNCore import networks
+from PINNCore.networks import ModelInput
 
 
 @pytest.fixture(autouse=True)
